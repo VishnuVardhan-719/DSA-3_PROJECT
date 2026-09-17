@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../../api/client'
 import { useResource } from '../../api/useResource'
-import { AsyncState, Badge, EmptyResults, Panel, SearchInput, Select } from '../../components/ui'
+import { AsyncState, Badge, Button, EmptyResults, Panel, SearchInput, Select } from '../../components/ui'
 import type { Contract, PageResponse } from '../../types/domain'
 
 const SORT_OPTIONS = {
@@ -20,6 +20,11 @@ export function ContractRegister({ refreshToken = 0 }: { refreshToken?: number }
   const [status, setStatus] = useState('All')
   const [department, setDepartment] = useState('All')
   const [sortLabel, setSortLabel] = useState<keyof typeof SORT_OPTIONS>('Recently modified')
+  const [includeArchived, setIncludeArchived] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkAction, setBulkAction] = useState('archive')
+  const [mutationError, setMutationError] = useState('')
+  const [mutating, setMutating] = useState(false)
 
   const resource = useResource((signal) => {
     const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
@@ -29,8 +34,9 @@ export function ContractRegister({ refreshToken = 0 }: { refreshToken?: number }
     if (query.trim()) params.set('query', query.trim())
     if (status !== 'All') params.set('compliance', status)
     if (department !== 'All') params.set('department', department)
+    if (includeArchived) params.set('includeArchived', 'true')
     return api.get<PageResponse<Contract>>(`/contracts?${params}`, signal)
-  }, [page, pageSize, query, status, department, sortLabel, refreshToken])
+  }, [page, pageSize, query, status, department, sortLabel, includeArchived, refreshToken])
 
   const data = resource.data
   const contracts = data?.items ?? EMPTY_CONTRACTS
@@ -51,6 +57,16 @@ export function ContractRegister({ refreshToken = 0 }: { refreshToken?: number }
   }
   const firstRecord = data?.total ? (page - 1) * pageSize + 1 : 0
   const lastRecord = data ? Math.min(page * pageSize, data.total) : 0
+  const runBulkAction = async () => {
+    if (!selected.size) return
+    setMutating(true); setMutationError('')
+    try {
+      const [action, value] = bulkAction.startsWith('status:') ? ['set_compliance', bulkAction.slice(7)] : [bulkAction, undefined]
+      await api.post('/contracts/bulk-actions', { contractIds: [...selected], action, ...(value ? { value } : {}) })
+      setSelected(new Set()); await resource.reload()
+    } catch (reason) { setMutationError(reason instanceof Error ? reason.message : 'Bulk action failed') }
+    finally { setMutating(false) }
+  }
 
   return (
     <AsyncState loading={resource.loading} error={resource.error} onRetry={resource.retry}>
@@ -71,22 +87,26 @@ export function ContractRegister({ refreshToken = 0 }: { refreshToken?: number }
           <Select label="Sort by" value={sortLabel} onChange={(event) => { setSortLabel(event.target.value as keyof typeof SORT_OPTIONS); setPage(1) }}>
             {Object.keys(SORT_OPTIONS).map((item) => <option key={item}>{item}</option>)}
           </Select>
+          <label className="archive-toggle"><input type="checkbox" checked={includeArchived} onChange={(event) => { setIncludeArchived(event.target.checked); setSelected(new Set()); setPage(1) }} /> Show archived</label>
           <span className="filter-summary"><ListFilter size={16} />{data?.total ?? 0} records</span>
         </div>
+        {selected.size > 0 && <div className="bulk-toolbar"><strong>{selected.size} selected</strong><select aria-label="Bulk action" value={bulkAction} onChange={(event) => setBulkAction(event.target.value)}><option value="archive">Archive</option><option value="restore">Restore</option><option value="status:Compliant">Mark compliant</option><option value="status:Needs Review">Mark needs review</option><option value="status:Exception">Mark exception</option></select><Button variant="secondary" onClick={runBulkAction} disabled={mutating}>{mutating ? 'Applying…' : 'Apply'}</Button><Button variant="quiet" onClick={() => setSelected(new Set())}>Clear</Button></div>}
+        {mutationError && <p className="form-error" role="alert">{mutationError}</p>}
 
         {contracts.length ? (
           <div className="table-scroll">
             <table className="contracts-table">
-              <thead><tr><th>Contract</th><th>Type</th><th>Current version</th><th>Last modified</th><th>Owner</th><th>Compliance</th><th>Review status</th></tr></thead>
+              <thead><tr><th className="selection-cell"><input type="checkbox" aria-label="Select current page" checked={contracts.length > 0 && contracts.every((item) => selected.has(item.id))} onChange={(event) => setSelected((current) => { const next = new Set(current); contracts.forEach((item) => event.target.checked ? next.add(item.id) : next.delete(item.id)); return next })} /></th><th>Contract</th><th>Type</th><th>Current version</th><th>Last modified</th><th>Owner</th><th>Compliance</th><th>Review status</th></tr></thead>
               <tbody>{contracts.map((contract) => (
                 <tr key={contract.id}>
+                  <td className="selection-cell"><input type="checkbox" aria-label={`Select ${contract.name}`} checked={selected.has(contract.id)} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(contract.id); else next.delete(contract.id); return next })} /></td>
                   <td><Link className="contract-link" to={`/contracts/${contract.id}`}><strong>{contract.name}</strong><span>{contract.id}</span></Link></td>
                   <td>{contract.type}</td>
                   <td><span className="version-pill">{contract.currentVersion}</span></td>
                   <td>{contract.lastModified}</td>
                   <td><div className="owner-cell"><span>{contract.owner.split(' ').map((part) => part[0]).join('').slice(0, 3)}</span>{contract.owner}</div></td>
                   <td><Badge>{contract.compliance}</Badge></td>
-                  <td><Badge>{contract.reviewStatus}</Badge></td>
+                  <td><Badge tone={contract.archivedAt ? 'archived' : undefined}>{contract.archivedAt ? 'Archived' : contract.reviewStatus}</Badge></td>
                 </tr>
               ))}</tbody>
             </table>

@@ -23,7 +23,7 @@ export interface Contract {
   counterparty: string
   jurisdiction: string
   description: string
-  archivedAt?: string
+  archivedAt?: string | null
   updatedAt: string
 }
 

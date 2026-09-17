@@ -6,7 +6,9 @@ The demonstration dataset is synthetic and must not be treated as legal advice, 
 
 ## Features
 
-- Portfolio dashboard, searchable contract register, contract detail, versions, clauses, compliance, and review history
+- Portfolio dashboard, server-paginated contract register, contract creation/edit/archive, contract detail, versions, clauses, compliance, and review history
+- Validated local PDF, DOCX, and TXT version ingestion with deterministic clause segmentation
+- Reviewer profiles, expertise/capacity lifecycle, and obligation catalogue management
 - Inverted-index clause search with Boolean retrieval and matched-term evidence
 - Dynamic-programming version alignment with word-level longest common subsequence evidence
 - TF-IDF cosine similarity, threshold graphs, and DFS connected components
@@ -90,7 +92,7 @@ Set-Location backend
 In a second terminal:
 
 ```powershell
-Set-Location "C:\2ND YEAR ODD SEM\PROJECTS\DSA\Project"
+Set-Location <repository-root>
 $env:VITE_API_BASE_URL = "http://127.0.0.1:8000"
 npm run dev -- --host 127.0.0.1 --port 5181
 ```
@@ -107,7 +109,10 @@ Set-Location backend
 Set-Location ..
 npm run lint
 npm run typecheck
+npm test -- --run
 npm run build
+npx playwright install chromium
+npm run test:e2e
 ```
 
 ## API overview
@@ -137,8 +142,9 @@ backend/docs/           Viva-oriented algorithm documentation
 
 - The corpus is intentionally compact and synthetic.
 - SQLite and `create_all` suit this local academic project; production migrations and concurrent deployment are outside scope.
-- Authentication, OCR, document ingestion, external regulatory feeds, and AI/LLM features are not implemented.
-- A later production phase could add authenticated roles, controlled document imports, migrations, and larger benchmark corpora without replacing the classical algorithms.
+- Authentication, OCR/scanned-document extraction, external regulatory feeds, and AI/LLM features are not implemented.
+- Document ingestion accepts text-bearing PDF, DOCX, and TXT files up to 10 MiB and rejects empty or scanned-only inputs.
+- A later production phase could add authenticated roles, OCR, object storage, and larger benchmark corpora without replacing the classical algorithms.
 
 ## Team
 

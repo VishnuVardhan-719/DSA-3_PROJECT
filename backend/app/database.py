@@ -34,6 +34,10 @@ def configure_database(database_url: str | None = None) -> None:
     SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
+def current_database_url() -> str:
+    return _database_url
+
+
 configure_database(_database_url)
 
 

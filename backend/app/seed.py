@@ -3,12 +3,13 @@
 from datetime import date, datetime, time, timedelta
 import argparse
 import json
+from pathlib import Path
 
 from sqlalchemy import func, select
 
 from . import models
 from . import database
-from .database import Base
+from .migrations import run_migrations
 
 
 CONTRACTS = [
@@ -90,7 +91,7 @@ def _older_version(label: str, offset: int) -> str:
 
 
 def initialize_database() -> None:
-    Base.metadata.create_all(database.engine)
+    run_migrations()
 
 
 def seed_database() -> None:
@@ -201,10 +202,22 @@ def seed_database() -> None:
         session.commit()
 
 
-def reset_and_seed() -> None:
-    Base.metadata.drop_all(database.engine)
-    Base.metadata.create_all(database.engine)
+def reset_and_seed(database_url: str | None = None) -> dict[str, int]:
+    target_url = database_url or database.current_database_url()
+    database.configure_database(target_url)
+    if target_url.startswith("sqlite:///"):
+        database.engine.dispose()
+        database_path = Path(target_url.removeprefix("sqlite:///"))
+        if str(database_path) != ":memory:" and database_path.exists():
+            database_path.unlink()
+        database.configure_database(target_url)
+    else:
+        from .database import Base
+
+        Base.metadata.drop_all(database.engine)
+    run_migrations(target_url)
     seed_database()
+    return database_counts()
 
 
 def seed_if_empty() -> None:

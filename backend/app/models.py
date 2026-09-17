@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, event
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, event
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -22,6 +22,11 @@ class Contract(Base):
     effective_date: Mapped[date] = mapped_column(Date)
     expiry_date: Mapped[date] = mapped_column(Date)
     risk: Mapped[str] = mapped_column(String(10))
+    counterparty: Mapped[str] = mapped_column(String(200), default="")
+    jurisdiction: Mapped[str] = mapped_column(String(120), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     versions: Mapped[list["ContractVersion"]] = relationship(back_populates="contract", cascade="all, delete-orphan")
 
 
@@ -34,6 +39,12 @@ class ContractVersion(Base):
     author: Mapped[str] = mapped_column(String(100))
     note: Mapped[str] = mapped_column(String(300))
     sequence: Mapped[int] = mapped_column(Integer)
+    source_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    source_sha256: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    source_media_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    source_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     contract: Mapped[Contract] = relationship(back_populates="versions")
     clauses: Mapped[list["Clause"]] = relationship(back_populates="version", cascade="all, delete-orphan")
     __table_args__ = (UniqueConstraint("contract_id", "label"),)
@@ -53,6 +64,8 @@ class Clause(Base):
     tier: Mapped[str] = mapped_column(String(20), index=True)
     guidance: Mapped[str] = mapped_column(Text)
     source_section: Mapped[str] = mapped_column(String(160))
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     version: Mapped[ContractVersion] = relationship(back_populates="clauses")
     tags: Mapped[list["ClauseTag"]] = relationship(back_populates="clause", cascade="all, delete-orphan")
     obligations: Mapped[list["ClauseObligation"]] = relationship(back_populates="clause", cascade="all, delete-orphan")
@@ -79,6 +92,8 @@ class Obligation(Base):
     name: Mapped[str] = mapped_column(String(160))
     category: Mapped[str] = mapped_column(String(80))
     description: Mapped[str] = mapped_column(Text)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
 class ClauseObligation(Base):
@@ -96,6 +111,9 @@ class Reviewer(Base):
     role: Mapped[str] = mapped_column(String(120))
     workload: Mapped[int] = mapped_column(Integer, default=0)
     capacity: Mapped[int] = mapped_column(Integer)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     expertise: Mapped[list["ReviewerExpertise"]] = relationship(back_populates="reviewer", cascade="all, delete-orphan")
 
 

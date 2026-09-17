@@ -37,9 +37,10 @@ function camelize(value: unknown): unknown {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isFormData = init.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { Accept: 'application/json', ...(init.body ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
+    headers: { Accept: 'application/json', ...(init.body && !isFormData ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
   })
   const body = response.status === 204 ? null : await response.json().catch(() => null)
   if (!response.ok) throw new ApiError(response.status, (body ?? {}) as ApiErrorBody)
@@ -70,4 +71,5 @@ export const api = {
   post: <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, { method: 'POST', body: JSON.stringify(body), signal }),
   put: <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, { method: 'PUT', body: JSON.stringify(body), signal }),
   patch: <T>(path: string, body: unknown, signal?: AbortSignal) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body), signal }),
+  upload: <T>(path: string, body: FormData, signal?: AbortSignal) => request<T>(path, { method: 'POST', body, signal }),
 }

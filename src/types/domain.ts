@@ -1,5 +1,12 @@
 export type ComplianceStatus = 'Compliant' | 'Needs Review' | 'Exception'
 export type ReviewStatus = 'Approved' | 'Reviewing' | 'Action Required' | 'Pending'
+export interface PageResponse<T> {
+  items: T[]
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
 export interface Contract {
   id: string
   name: string
@@ -13,6 +20,11 @@ export interface Contract {
   effectiveDate: string
   expiryDate: string
   risk: 'Low' | 'Medium' | 'High'
+  counterparty: string
+  jurisdiction: string
+  description: string
+  archivedAt?: string
+  updatedAt: string
 }
 
 export interface Clause {

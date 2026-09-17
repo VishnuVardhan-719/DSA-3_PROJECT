@@ -1,0 +1,29 @@
+import { CircleHelp, Network, SlidersHorizontal } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { api, isMissingRoute, listFrom, valueFrom } from '../api/client'
+import { useResource } from '../api/useResource'
+import { AsyncState, Badge, PageHeader, Panel, Progress } from '../components/ui'
+import type { Contract, SimilarityEdge, SimilarityGraph, SimilarityNode } from '../types/domain'
+
+const colors = ['#315e87', '#b64048', '#677f70', '#8a6f3a', '#685582']
+const EMPTY_NODES: SimilarityNode[] = []
+const EMPTY_EDGES: SimilarityEdge[] = []
+const EMPTY_CONTRACTS: Contract[] = []
+
+export function SimilarityPage() {
+  const [threshold, setThreshold] = useState(0.75); const [selected, setSelected] = useState('')
+  const resource = useResource(async (signal) => {
+    const graphPromise = api.post<unknown>('/similarity/graph', { threshold }, signal).catch(error => { if (!isMissingRoute(error)) throw error; return api.get<unknown>(`/similarity-graph?threshold=${threshold}`, signal) })
+    const [graphPayload, contractsPayload] = await Promise.all([graphPromise, api.get<unknown>('/contracts?page=1&pageSize=100', signal)])
+    const graph = valueFrom<SimilarityGraph>(graphPayload, 'graph'); return { graph: { ...graph, nodes: graph.nodes ?? listFrom<SimilarityNode>(graphPayload, 'nodes'), edges: graph.edges ?? listFrom<SimilarityEdge>(graphPayload, 'edges') }, contracts: listFrom<Contract>(contractsPayload, 'contracts') }
+  }, [threshold])
+  const graph = resource.data?.graph; const nodes = graph?.nodes ?? EMPTY_NODES; const edges = graph?.edges ?? EMPTY_EDGES; const contracts = resource.data?.contracts ?? EMPTY_CONTRACTS
+  const effectiveSelected = selected || nodes[0]?.id || ''
+  const positions = useMemo(() => Object.fromEntries(nodes.map((node, index) => { const angle = (index / Math.max(nodes.length, 1)) * Math.PI * 2 - Math.PI / 2; return [node.id, { x: 255 + Math.cos(angle) * 180, y: 155 + Math.sin(angle) * 110 }] })), [nodes])
+  const components = graph?.components ?? []; const related = edges.filter(e => e.source === effectiveSelected || e.target === effectiveSelected).sort((a, b) => b.score - a.score); const selectedContract = contracts.find(c => c.id === effectiveSelected)
+  return <><PageHeader title="Similarity & Clustering" description="Explore TF-IDF contract relationships and threshold-graph components." /><Panel className="analysis-toolbar"><div className="threshold-control"><SlidersHorizontal size={17} /><div><label htmlFor="threshold">Similarity threshold <strong>{threshold.toFixed(2)}</strong></label><input id="threshold" type="range" min="0" max="100" value={threshold * 100} onChange={(e) => setThreshold(Number(e.target.value) / 100)} /></div></div><div className="method-note"><Network size={18} /><span><strong>TF-IDF + cosine similarity</strong>DFS connected components</span></div></Panel>
+    <AsyncState loading={resource.loading} error={resource.error} empty={!nodes.length} onRetry={resource.retry}><div className="similarity-layout"><Panel title="Contract relationship graph" description="Select a contract to inspect its evidence links" className="graph-panel"><div className="relationship-graph"><svg viewBox="0 0 510 310" role="img" aria-label={`Similarity graph connecting ${nodes.length} contracts`}>{edges.map(edge => { const source = positions[edge.source]; const target = positions[edge.target]; return source && target ? <g key={`${edge.source}-${edge.target}`}><line x1={source.x} y1={source.y} x2={target.x} y2={target.y} /><text x={(source.x + target.x) / 2} y={(source.y + target.y) / 2 - 5}>{edge.score.toFixed(2)}</text></g> : null })}{nodes.map((node, index) => { const position = positions[node.id]; return <g key={node.id} tabIndex={0} role="button" aria-label={`Select ${node.id}`} className={`graph-node cluster-${String.fromCharCode(97 + index % 3)} ${effectiveSelected === node.id ? 'selected' : ''}`} onClick={() => setSelected(node.id)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelected(node.id) }} transform={`translate(${position.x} ${position.y})`}><rect x="-42" y="-19" width="84" height="38" rx="4" /><text textAnchor="middle" dy="-1">{node.id}</text><text className="node-cluster" textAnchor="middle" dy="11">{node.cluster ?? `GROUP ${index + 1}`}</text></g>})}</svg></div></Panel>
+      <Panel title="Selected contract" description="Relationship evidence"><div className="selected-contract"><span>Contract record</span><h2>{effectiveSelected}</h2><p>{selectedContract?.name ?? nodes.find(n => n.id === effectiveSelected)?.label}</p><Badge tone="compliant">Computed</Badge></div><div className="related-list"><h3>Related contracts</h3>{related.map(item => { const id = item.source === effectiveSelected ? item.target : item.source; return <div key={`${item.source}-${item.target}`}><div><strong>{id}</strong><span>{contracts.find(c => c.id === id)?.name}</span></div><div className="score"><Progress value={item.score * 100} /><strong>{item.score.toFixed(2)}</strong></div></div>})}</div><div className="info-callout"><CircleHelp size={17} /><p>Edges meet the selected cosine-similarity threshold. Components are derived with DFS.</p></div></Panel></div>
+      <div className="cluster-grid">{components.map((members, index) => <article key={members.join('-')} style={{ '--cluster-color': colors[index % colors.length] } as React.CSSProperties}><div><span>Component {index + 1}</span><i /></div><h2>{members.join(', ')}</h2><strong>{members.length} contracts</strong><p>Connected at threshold {threshold.toFixed(2)}.</p><button onClick={() => setSelected(members[0])}>Explore component</button></article>)}</div>
+    </AsyncState></>
+}

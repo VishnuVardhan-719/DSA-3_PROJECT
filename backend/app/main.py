@@ -23,6 +23,9 @@ from .algorithms.similarity import build_threshold_graph, connected_components, 
 from .database import engine, get_session
 from . import models, schemas
 from .api.contracts import router as contract_mutation_router
+from .api.clauses import router as clause_mutation_router, version_router as version_clause_router
+from .api.obligations import router as obligation_router
+from .api.versions import router as version_mutation_router
 from .errors import ApiError
 from .seed import seed_if_empty
 from .services.lifecycle import audit_event as _audit, contract_or_404 as _contract_or_404
@@ -57,6 +60,7 @@ def _clause_dict(clause: models.Clause, version_label: str | None = None, matche
         "status": clause.status, "tags": sorted(item.tag.name for item in clause.tags),
         "page_number": clause.page_number, "tier": clause.tier, "guidance": clause.guidance,
         "source_section": clause.source_section, "matched_text": clause.text if matched else None, "match": matched,
+        "archived_at": clause.archived_at, "updated_at": clause.updated_at,
     }
 
 
@@ -64,6 +68,7 @@ def _current_version(session: Session, contract: models.Contract) -> models.Cont
     return session.scalar(select(models.ContractVersion).where(
         models.ContractVersion.contract_id == contract.id,
         models.ContractVersion.label == contract.current_version,
+        models.ContractVersion.archived_at.is_(None),
     ))
 
 
@@ -71,7 +76,10 @@ def _current_clauses(session: Session, contract: models.Contract) -> list[models
     version = _current_version(session, contract)
     if version is None:
         return []
-    return list(session.scalars(select(models.Clause).where(models.Clause.version_id == version.id)
+    return list(session.scalars(select(models.Clause).where(
+                                    models.Clause.version_id == version.id,
+                                    models.Clause.archived_at.is_(None),
+                                )
                                 .options(selectinload(models.Clause.tags).selectinload(models.ClauseTag.tag),
                                          selectinload(models.Clause.obligations).selectinload(models.ClauseObligation.obligation))
                                 .order_by(models.Clause.position)))
@@ -98,6 +106,10 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
                        allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"], allow_headers=["*"])
     app.include_router(contract_mutation_router)
+    app.include_router(version_mutation_router)
+    app.include_router(clause_mutation_router)
+    app.include_router(version_clause_router)
+    app.include_router(obligation_router)
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, error: ApiError):
@@ -195,7 +207,10 @@ def create_app() -> FastAPI:
         version = session.get(models.ContractVersion, version_id) if version_id else _current_version(session, contract)
         if not version or version.contract_id != contract_id:
             raise ApiError(404, "not_found", f"Version {version_id} was not found for {contract_id}")
-        clauses = list(session.scalars(select(models.Clause).where(models.Clause.version_id == version.id)
+        clauses = list(session.scalars(select(models.Clause).where(
+                                           models.Clause.version_id == version.id,
+                                           models.Clause.archived_at.is_(None),
+                                       )
                                        .options(selectinload(models.Clause.tags).selectinload(models.ClauseTag.tag))
                                        .order_by(models.Clause.position)))
         total = len(clauses)
@@ -208,7 +223,10 @@ def create_app() -> FastAPI:
         page_size: int = Query(20, alias="pageSize", ge=1, le=100), session: Session = Depends(get_session),
     ):
         _contract_or_404(session, contract_id)
-        statement = select(models.ContractVersion).where(models.ContractVersion.contract_id == contract_id)
+        statement = select(models.ContractVersion).where(
+            models.ContractVersion.contract_id == contract_id,
+            models.ContractVersion.archived_at.is_(None),
+        )
         total = session.scalar(select(func.count()).select_from(statement.subquery()))
         rows = list(session.scalars(statement.order_by(models.ContractVersion.sequence.desc())
                                     .offset((page - 1) * page_size).limit(page_size)))
@@ -220,7 +238,9 @@ def create_app() -> FastAPI:
         contract_id: str | None = Query(None, alias="contractId"), status_filter: str | None = Query(None, alias="status"),
         tier: str | None = None, session: Session = Depends(get_session),
     ):
-        contracts = list(session.scalars(select(models.Contract).order_by(models.Contract.id)))
+        contracts = list(session.scalars(select(models.Contract).where(
+            models.Contract.archived_at.is_(None)
+        ).order_by(models.Contract.id)))
         if contract_id:
             contracts = [item for item in contracts if item.id == contract_id]
             if not contracts:
@@ -242,7 +262,9 @@ def create_app() -> FastAPI:
         contract_id: str | None = Query(None, alias="contractId"), status_filter: str | None = Query(None, alias="status"),
         tier: str | None = None, session: Session = Depends(get_session),
     ):
-        contracts = list(session.scalars(select(models.Contract).order_by(models.Contract.id)))
+        contracts = list(session.scalars(select(models.Contract).where(
+            models.Contract.archived_at.is_(None)
+        ).order_by(models.Contract.id)))
         clauses = [clause for contract in contracts for clause in _current_clauses(session, contract)]
         by_id = {clause.id: clause for clause in clauses}
         index = InvertedIndex({clause.id: f"{clause.title} {clause.text} {' '.join(item.tag.name for item in clause.tags)}"
@@ -275,7 +297,10 @@ def create_app() -> FastAPI:
             raise ApiError(404, "not_found", "One or both comparison versions were not found for this contract")
         def sequence(version_id: str):
             return [{"key": item.clause_key, "text": item.text, "title": item.title}
-                    for item in session.scalars(select(models.Clause).where(models.Clause.version_id == version_id)
+                    for item in session.scalars(select(models.Clause).where(
+                                                    models.Clause.version_id == version_id,
+                                                    models.Clause.archived_at.is_(None),
+                                                )
                                                 .order_by(models.Clause.position))]
         return {"contract_id": contract_id, "base_version": _version_dict(base), "target_version": _version_dict(target),
                 "changes": align_clause_sequences(sequence(base.id), sequence(target.id))}
@@ -286,7 +311,9 @@ def create_app() -> FastAPI:
 
     @app.get("/similarity-graph", response_model=schemas.SimilarityGraphOut, tags=["analysis"])
     def similarity_graph(threshold: float = Query(0.35, ge=0, le=1), session: Session = Depends(get_session)):
-        contracts = list(session.scalars(select(models.Contract).order_by(models.Contract.id)))
+        contracts = list(session.scalars(select(models.Contract).where(
+            models.Contract.archived_at.is_(None)
+        ).order_by(models.Contract.id)))
         documents = {contract.id: " ".join(f"{clause.title} {clause.text}" for clause in _current_clauses(session, contract))
                      for contract in contracts}
         ids, matrix = similarity_matrix(documents)
@@ -304,7 +331,9 @@ def create_app() -> FastAPI:
     @app.get("/compliance/coverage", response_model=schemas.CoverageOut, tags=["analysis"])
     def compliance_coverage(contract_id: str = Query(alias="contractId"), session: Session = Depends(get_session)):
         contract = _contract_or_404(session, contract_id)
-        obligations = list(session.scalars(select(models.Obligation).order_by(models.Obligation.id)))
+        obligations = list(session.scalars(select(models.Obligation).where(
+            models.Obligation.archived_at.is_(None)
+        ).order_by(models.Obligation.id)))
         clauses = _current_clauses(session, contract)
         candidates = {clause.clause_key: {link.obligation_id for link in clause.obligations} for clause in clauses}
         result = greedy_set_cover({item.id for item in obligations}, candidates)

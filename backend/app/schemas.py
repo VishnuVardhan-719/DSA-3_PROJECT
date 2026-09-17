@@ -143,6 +143,64 @@ class VersionOut(ApiModel):
     sequence: int
 
 
+class ClauseCreate(InputModel):
+    title: str = Field(min_length=2, max_length=160)
+    text: str = Field(min_length=1, max_length=100000)
+    status: Literal["Compliant", "Needs Review", "Exception"] = "Needs Review"
+    tier: Literal["Preferred", "Acceptable", "Fallback", "Restricted"] = "Acceptable"
+    guidance: str = Field(default="", max_length=5000)
+    source_section: str = Field(default="", max_length=160)
+
+
+class VersionCreate(InputModel):
+    label: str = Field(min_length=1, max_length=20)
+    effective_date: date
+    author: str = Field(min_length=2, max_length=100)
+    note: str = Field(default="", max_length=300)
+    clauses: list[ClauseCreate] = Field(min_length=1, max_length=500)
+
+
+class ClauseUpdate(InputModel):
+    updated_at: datetime
+    title: str | None = Field(default=None, min_length=2, max_length=160)
+    text: str | None = Field(default=None, min_length=1, max_length=100000)
+    status: Literal["Compliant", "Needs Review", "Exception"] | None = None
+    tier: Literal["Preferred", "Acceptable", "Fallback", "Restricted"] | None = None
+    guidance: str | None = Field(default=None, max_length=5000)
+    source_section: str | None = Field(default=None, max_length=160)
+
+
+class ObligationMappingUpdate(InputModel):
+    obligation_ids: list[str] = Field(max_length=200)
+
+
+class ObligationMappingOut(ApiModel):
+    clause_id: str
+    obligation_ids: list[str]
+
+
+class ObligationCreate(InputModel):
+    name: str = Field(min_length=2, max_length=160)
+    category: str = Field(min_length=2, max_length=80)
+    description: str = Field(min_length=1, max_length=5000)
+
+
+class ObligationUpdate(InputModel):
+    updated_at: datetime
+    name: str | None = Field(default=None, min_length=2, max_length=160)
+    category: str | None = Field(default=None, min_length=2, max_length=80)
+    description: str | None = Field(default=None, min_length=1, max_length=5000)
+
+
+class ObligationOut(ApiModel):
+    id: str
+    name: str
+    category: str
+    description: str
+    archived_at: datetime | None
+    updated_at: datetime
+
+
 class ClauseOut(ApiModel):
     id: str
     clause_key: str
@@ -159,6 +217,8 @@ class ClauseOut(ApiModel):
     source_section: str
     matched_text: str | None = None
     match: str | None = None
+    archived_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ContractDetail(ContractSummary):

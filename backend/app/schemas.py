@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 def to_camel(value: str) -> str:
@@ -58,6 +58,79 @@ class ContractSummary(ApiModel):
     effective_date: date
     expiry_date: date
     risk: str
+    counterparty: str
+    jurisdiction: str
+    description: str
+    archived_at: datetime | None
+    updated_at: datetime
+
+
+class ContractCreate(InputModel):
+    id: str | None = Field(default=None, pattern=r"^CTR-[A-Z0-9-]{3,12}$")
+    name: str = Field(min_length=2, max_length=200)
+    contract_type: str = Field(
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("contract_type", "type"),
+        serialization_alias="type",
+    )
+    owner: str = Field(min_length=2, max_length=100)
+    department: str = Field(min_length=2, max_length=80)
+    compliance: Literal["Compliant", "Needs Review", "Exception"]
+    review_status: Literal["Approved", "Reviewing", "Action Required", "Pending"] = "Pending"
+    effective_date: date
+    expiry_date: date
+    risk: Literal["Low", "Medium", "High"] = "Medium"
+    counterparty: str = Field(default="", max_length=200)
+    jurisdiction: str = Field(default="", max_length=120)
+    description: str = Field(default="", max_length=5000)
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+        if self.expiry_date < self.effective_date:
+            raise ValueError("expiryDate must not be before effectiveDate")
+        return self
+
+
+class ContractUpdate(InputModel):
+    updated_at: datetime
+    name: str | None = Field(default=None, min_length=2, max_length=200)
+    contract_type: str | None = Field(
+        default=None,
+        min_length=2,
+        max_length=80,
+        validation_alias=AliasChoices("contract_type", "type"),
+        serialization_alias="type",
+    )
+    owner: str | None = Field(default=None, min_length=2, max_length=100)
+    department: str | None = Field(default=None, min_length=2, max_length=80)
+    compliance: Literal["Compliant", "Needs Review", "Exception"] | None = None
+    review_status: Literal["Approved", "Reviewing", "Action Required", "Pending"] | None = None
+    effective_date: date | None = None
+    expiry_date: date | None = None
+    risk: Literal["Low", "Medium", "High"] | None = None
+    counterparty: str | None = Field(default=None, max_length=200)
+    jurisdiction: str | None = Field(default=None, max_length=120)
+    description: str | None = Field(default=None, max_length=5000)
+
+
+class ContractBulkAction(InputModel):
+    contract_ids: list[str] = Field(min_length=1, max_length=100)
+    action: Literal["archive", "restore", "set_compliance"]
+    value: Literal["Compliant", "Needs Review", "Exception"] | None = None
+
+    @model_validator(mode="after")
+    def validate_action_value(self):
+        if self.action == "set_compliance" and self.value is None:
+            raise ValueError("value is required for set_compliance")
+        if self.action != "set_compliance" and self.value is not None:
+            raise ValueError("value is only valid for set_compliance")
+        return self
+
+
+class BulkActionResult(ApiModel):
+    affected: int
+    action: str
 
 
 class VersionOut(ApiModel):

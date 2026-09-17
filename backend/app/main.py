@@ -21,18 +21,13 @@ from .algorithms.search import InvertedIndex
 from .algorithms.similarity import build_threshold_graph, connected_components, similarity_matrix
 from .database import engine, get_session
 from . import models, schemas
+from .api.contracts import router as contract_mutation_router
+from .errors import ApiError
 from .seed import seed_if_empty
+from .services.lifecycle import audit_event as _audit, contract_or_404 as _contract_or_404
 
 
 ASSIGNMENT_OBJECTIVE = "maximize valid assignments first, then minimize workload/expertise cost"
-
-
-class ApiError(Exception):
-    def __init__(self, status_code: int, code: str, message: str, details=None):
-        self.status_code = status_code
-        self.code = code
-        self.message = message
-        self.details = details
 
 
 def _error_payload(code: str, message: str, details=None) -> dict:
@@ -64,7 +59,7 @@ def _clause_dict(clause: models.Clause, version_label: str | None = None, matche
     }
 
 
-def _current_version(session: Session, contract: models.Contract) -> models.ContractVersion:
+def _current_version(session: Session, contract: models.Contract) -> models.ContractVersion | None:
     return session.scalar(select(models.ContractVersion).where(
         models.ContractVersion.contract_id == contract.id,
         models.ContractVersion.label == contract.current_version,
@@ -73,28 +68,12 @@ def _current_version(session: Session, contract: models.Contract) -> models.Cont
 
 def _current_clauses(session: Session, contract: models.Contract) -> list[models.Clause]:
     version = _current_version(session, contract)
+    if version is None:
+        return []
     return list(session.scalars(select(models.Clause).where(models.Clause.version_id == version.id)
                                 .options(selectinload(models.Clause.tags).selectinload(models.ClauseTag.tag),
                                          selectinload(models.Clause.obligations).selectinload(models.ClauseObligation.obligation))
                                 .order_by(models.Clause.position)))
-
-
-def _contract_or_404(session: Session, contract_id: str) -> models.Contract:
-    contract = session.get(models.Contract, contract_id)
-    if not contract:
-        raise ApiError(404, "not_found", f"Contract {contract_id} was not found")
-    return contract
-
-
-def _audit(session: Session, actor: str, action: str, entity_type: str, entity_id: str, detail: str,
-           event_status: str = "Completed") -> models.AuditEvent:
-    pending_count = sum(isinstance(item, models.AuditEvent) for item in session.new)
-    next_number = (session.scalar(select(func.count()).select_from(models.AuditEvent)) or 0) + pending_count + 1
-    event = models.AuditEvent(id=f"AUD-{next_number:06d}", occurred_at=datetime.now(), actor=actor,
-                              action=action, entity_type=entity_type, entity_id=entity_id,
-                              detail=detail, status=event_status)
-    session.add(event)
-    return event
 
 
 @asynccontextmanager
@@ -117,6 +96,7 @@ def create_app() -> FastAPI:
     origins = [value.strip() for value in os.getenv("CORS_ORIGINS", ",".join(default_origins)).split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
                        allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"], allow_headers=["*"])
+    app.include_router(contract_mutation_router)
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, error: ApiError):
@@ -161,7 +141,7 @@ def create_app() -> FastAPI:
         review_status: str | None = Query(None, alias="reviewStatus"), session: Session = Depends(get_session),
     ):
         statement = select(models.Contract)
-        filters = []
+        filters = [models.Contract.archived_at.is_(None)]
         if query:
             pattern = f"%{query}%"
             filters.append(or_(models.Contract.id.ilike(pattern), models.Contract.name.ilike(pattern),

@@ -13,7 +13,7 @@ const SORT_OPTIONS = {
 } as const
 const EMPTY_CONTRACTS: Contract[] = []
 
-export function ContractRegister() {
+export function ContractRegister({ refreshToken = 0 }: { refreshToken?: number }) {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(5)
   const [query, setQuery] = useState('')
@@ -30,7 +30,7 @@ export function ContractRegister() {
     if (status !== 'All') params.set('compliance', status)
     if (department !== 'All') params.set('department', department)
     return api.get<PageResponse<Contract>>(`/contracts?${params}`, signal)
-  }, [page, pageSize, query, status, department, sortLabel])
+  }, [page, pageSize, query, status, department, sortLabel, refreshToken])
 
   const data = resource.data
   const contracts = data?.items ?? EMPTY_CONTRACTS

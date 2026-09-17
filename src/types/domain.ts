@@ -42,6 +42,8 @@ export interface Clause {
   previousVersion?: string
   matchedText?: string
   match?: string
+  updatedAt?: string
+  archivedAt?: string
 }
 
 export interface ContractVersion {
@@ -85,6 +87,18 @@ export interface Reviewer {
   expertise: string[]
   currentWorkload?: number
   maxCapacity?: number
+  active?: boolean
+  archivedAt?: string
+  updatedAt?: string
+}
+
+export interface ObligationRecord {
+  id: string
+  name: string
+  category: string
+  description: string
+  archivedAt?: string
+  updatedAt: string
 }
 
 export interface Assignment {

@@ -25,6 +25,7 @@ from . import models, schemas
 from .api.contracts import router as contract_mutation_router
 from .api.clauses import router as clause_mutation_router, version_router as version_clause_router
 from .api.obligations import router as obligation_router
+from .api.reviewers import router as reviewer_mutation_router
 from .api.versions import router as version_mutation_router
 from .errors import ApiError
 from .seed import seed_if_empty
@@ -110,6 +111,7 @@ def create_app() -> FastAPI:
     app.include_router(clause_mutation_router)
     app.include_router(version_clause_router)
     app.include_router(obligation_router)
+    app.include_router(reviewer_mutation_router)
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, error: ApiError):
@@ -364,7 +366,9 @@ def create_app() -> FastAPI:
         confirmed = dict(session.execute(select(models.Assignment.reviewer_id, func.count()).group_by(models.Assignment.reviewer_id)).all())
         items = [{"id": person.id, "name": person.name, "role": person.role,
                   "assigned": person.workload + confirmed.get(person.id, 0), "capacity": person.capacity,
-                  "expertise": sorted(item.expertise.name for item in person.expertise)} for person in people]
+                  "expertise": sorted(item.expertise.name for item in person.expertise),
+                  "active": person.active, "archived_at": person.archived_at,
+                  "updated_at": person.updated_at} for person in people]
         if query:
             folded = query.casefold()
             items = [item for item in items if folded in f"{item['id']} {item['name']} {item['role']}".casefold()]
@@ -397,7 +401,7 @@ def create_app() -> FastAPI:
                 raise ApiError(404, "not_found", "One or more contracts were not found", {"contractIds": missing})
             statement = statement.where(models.Contract.id.in_(payload.contract_ids))
         contracts = list(session.scalars(statement.order_by(models.Contract.id)))
-        people = list(session.scalars(select(models.Reviewer).options(
+        people = list(session.scalars(select(models.Reviewer).where(models.Reviewer.active.is_(True)).options(
             selectinload(models.Reviewer.expertise).selectinload(models.ReviewerExpertise.expertise)).order_by(models.Reviewer.id)))
         confirmed = dict(session.execute(select(models.Assignment.reviewer_id, func.count()).group_by(models.Assignment.reviewer_id)).all())
         tasks = [{"id": item.id, "requiredExpertise": [item.contract_type, item.department]} for item in contracts]
@@ -426,6 +430,10 @@ def create_app() -> FastAPI:
             raise ApiError(404, "not_found", "Assignment references were not found",
                            {"contractIds": missing_contracts, "reviewerIds": missing_reviewers})
         current_counts = dict(session.execute(select(models.Assignment.reviewer_id, func.count()).group_by(models.Assignment.reviewer_id)).all())
+        inactive = sorted(reviewer_id for reviewer_id, person in people.items() if not person.active)
+        if inactive:
+            raise ApiError(409, "inactive_reviewer", "Inactive reviewers cannot receive assignments",
+                           {"reviewerIds": inactive})
         incoming: dict[str, int] = {}
         for item in payload.assignments:
             incoming[item.reviewer_id] = incoming.get(item.reviewer_id, 0) + 1

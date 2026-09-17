@@ -294,6 +294,24 @@ class ReviewerOut(ApiModel):
     assigned: int
     capacity: int
     expertise: list[str]
+    active: bool
+    archived_at: datetime | None
+    updated_at: datetime
+
+
+class ReviewerCreate(InputModel):
+    name: str = Field(min_length=2, max_length=100)
+    role: str = Field(min_length=2, max_length=120)
+    capacity: int = Field(ge=1, le=100)
+    expertise: list[str] = Field(min_length=1, max_length=30)
+
+
+class ReviewerUpdate(InputModel):
+    updated_at: datetime
+    name: str | None = Field(default=None, min_length=2, max_length=100)
+    role: str | None = Field(default=None, min_length=2, max_length=120)
+    capacity: int | None = Field(default=None, ge=1, le=100)
+    expertise: list[str] | None = Field(default=None, min_length=1, max_length=30)
 
 
 class ProposalRequest(InputModel):

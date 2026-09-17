@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 import math
 import os
+from typing import Literal
 
 from fastapi import Depends, FastAPI, Query, Request, status
 from fastapi.exceptions import RequestValidationError
@@ -138,10 +139,14 @@ def create_app() -> FastAPI:
     def list_contracts(
         page: int = Query(1, ge=1), page_size: int = Query(20, alias="pageSize", ge=1, le=100),
         query: str | None = None, compliance: str | None = None, department: str | None = None,
-        review_status: str | None = Query(None, alias="reviewStatus"), session: Session = Depends(get_session),
+        review_status: str | None = Query(None, alias="reviewStatus"),
+        sort: Literal["name", "lastModified", "risk", "id"] = "lastModified",
+        direction: Literal["asc", "desc"] = "desc",
+        include_archived: bool = Query(False, alias="includeArchived"),
+        session: Session = Depends(get_session),
     ):
         statement = select(models.Contract)
-        filters = [models.Contract.archived_at.is_(None)]
+        filters = [] if include_archived else [models.Contract.archived_at.is_(None)]
         if query:
             pattern = f"%{query}%"
             filters.append(or_(models.Contract.id.ilike(pattern), models.Contract.name.ilike(pattern),
@@ -155,7 +160,19 @@ def create_app() -> FastAPI:
         if filters:
             statement = statement.where(*filters)
         total = session.scalar(select(func.count()).select_from(statement.subquery()))
-        items = list(session.scalars(statement.order_by(models.Contract.id).offset((page - 1) * page_size).limit(page_size)))
+        sort_columns = {
+            "name": models.Contract.name,
+            "lastModified": models.Contract.last_modified,
+            "risk": models.Contract.risk,
+            "id": models.Contract.id,
+        }
+        order_column = sort_columns[sort]
+        order_expression = order_column.asc() if direction == "asc" else order_column.desc()
+        items = list(session.scalars(
+            statement.order_by(order_expression, models.Contract.id.asc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ))
         return _pagination(items, page, page_size, total)
 
     @app.get("/contracts/{contract_id}", response_model=schemas.ContractDetail, tags=["contracts"])

@@ -40,6 +40,24 @@ test('contract creation dialog is usable and keyboard dismissible', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+test('records review evidence and restores an archived clause', async ({ page }) => {
+  await page.goto('/review-queue', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Approve' }).first().click()
+  await page.getByLabel('Decision notes').fill('Approved after verifying the supporting clause evidence.')
+  await page.getByLabel('Decided by').fill('Anita Rao')
+  await page.getByRole('button', { name: 'Record decision' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+
+  await page.goto('/contracts/CTR-001', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('tab', { name: 'Clauses' }).click()
+  await page.getByRole('button', { name: 'Archive clause' }).first().click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Archive clause' }).click()
+  await expect(page.getByRole('button', { name: 'Restore clause' }).first()).toBeVisible()
+  await page.getByRole('button', { name: 'Restore clause' }).first().click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Restore clause' }).click()
+  await expect(page.getByRole('button', { name: 'Archive clause' }).first()).toBeVisible()
+})
+
 test('creates, versions, imports, archives, and restores a contract', async ({ page }) => {
   const name = 'Playwright Infrastructure Agreement'
   await page.goto('/contracts', { waitUntil: 'domcontentloaded' })

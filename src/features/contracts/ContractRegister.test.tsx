@@ -55,4 +55,21 @@ describe('ContractRegister', () => {
     expect(await screen.findByText('Second Page Agreement')).toBeVisible()
     expect(requests[1]).toContain('page=2&pageSize=5')
   })
+
+  it('keeps the visible-page selection when an atomic bulk action fails', async () => {
+    const item = contract('CTR-001', 'First Agreement')
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'POST') return new Response(JSON.stringify({ error: { code: 'not_found', message: 'One contract no longer exists' } }), { status: 404, headers: { 'Content-Type': 'application/json' } })
+      return new Response(JSON.stringify(response(1, [item])), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+    const user = userEvent.setup()
+    render(<MemoryRouter><ContractRegister /></MemoryRouter>)
+
+    await user.click(await screen.findByLabelText('Select First Agreement'))
+    await user.click(screen.getByRole('button', { name: 'Apply' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('One contract no longer exists')
+    expect(screen.getByText('1 selected')).toBeVisible()
+    expect(screen.getByLabelText('Select First Agreement')).toBeChecked()
+  })
 })

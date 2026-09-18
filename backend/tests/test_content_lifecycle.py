@@ -67,6 +67,28 @@ def test_structured_version_creation_is_persisted(client):
     assert response.json()["clauses"][0]["clauseKey"] == "CTR-001-C01"
 
 
+def test_new_contract_without_a_version_has_an_empty_clause_page(client):
+    created = client.post(
+        "/contracts",
+        json={
+            "name": "Unversioned Agreement",
+            "type": "Services",
+            "owner": "Legal Operations",
+            "department": "Legal",
+            "compliance": "Needs Review",
+            "reviewStatus": "Pending",
+            "effectiveDate": "2026-10-01",
+            "expiryDate": "2027-10-01",
+            "risk": "Medium",
+        },
+    ).json()
+
+    response = client.get(f"/contracts/{created['id']}/clauses")
+
+    assert response.status_code == 200
+    assert response.json() == {"items": [], "page": 1, "pageSize": 50, "total": 0, "totalPages": 0}
+
+
 def test_replace_clause_obligations_is_atomic(client):
     clause_id = client.get("/contracts/CTR-001/clauses").json()["items"][0]["id"]
 
@@ -105,6 +127,20 @@ def test_archived_clause_disappears_from_default_search(client):
     assert clause["id"] not in search_ids
 
 
+def test_archived_clause_can_be_listed_and_restored(client):
+    clause = client.get("/contracts/CTR-001/clauses").json()["items"][0]
+    assert client.post(f"/clauses/{clause['id']}/archive").status_code == 200
+
+    archived_items = client.get(
+        "/contracts/CTR-001/clauses?pageSize=100&includeArchived=true"
+    ).json()["items"]
+    assert clause["id"] in {item["id"] for item in archived_items}
+
+    restored = client.post(f"/clauses/{clause['id']}/restore")
+    assert restored.status_code == 200
+    assert restored.json()["archivedAt"] is None
+
+
 def test_obligation_create_update_and_archive(client):
     created = client.post(
         "/obligations",
@@ -121,3 +157,16 @@ def test_obligation_create_update_and_archive(client):
     archived = client.post(f"/obligations/{body['id']}/archive")
     assert archived.status_code == 200
     assert archived.json()["archivedAt"] is not None
+
+
+def test_archived_obligation_can_be_restored(client):
+    created = client.post(
+        "/obligations",
+        json={"name": "Restorable control", "category": "Security", "description": "Restore this control."},
+    ).json()
+    assert client.post(f"/obligations/{created['id']}/archive").status_code == 200
+
+    restored = client.post(f"/obligations/{created['id']}/restore")
+
+    assert restored.status_code == 200
+    assert restored.json()["archivedAt"] is None

@@ -90,3 +90,15 @@ def archive_obligation(obligation_id: str, session: Session = Depends(get_sessio
     audit_event(session, "Compliance Reviewer", "Obligation Archived", "Obligation", obligation.id, obligation.name)
     session.commit()
     return obligation
+
+
+@router.post("/{obligation_id}/restore", response_model=schemas.ObligationOut)
+def restore_obligation(obligation_id: str, session: Session = Depends(get_session)):
+    obligation = _obligation_or_404(session, obligation_id, include_archived=True)
+    if obligation.archived_at is None:
+        raise ApiError(409, "invalid_state", f"Obligation {obligation_id} is not archived")
+    obligation.archived_at = None
+    obligation.updated_at = datetime.now()
+    audit_event(session, "Compliance Reviewer", "Obligation Restored", "Obligation", obligation.id, obligation.name)
+    session.commit()
+    return obligation

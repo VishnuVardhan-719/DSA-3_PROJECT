@@ -203,18 +203,23 @@ def create_app() -> FastAPI:
     @app.get("/contracts/{contract_id}/clauses", response_model=schemas.Page[schemas.ClauseOut], tags=["clauses"])
     def contract_clauses(
         contract_id: str, page: int = Query(1, ge=1), page_size: int = Query(50, alias="pageSize", ge=1, le=100),
-        version_id: str | None = Query(None, alias="versionId"), session: Session = Depends(get_session),
+        version_id: str | None = Query(None, alias="versionId"),
+        include_archived: bool = Query(False, alias="includeArchived"),
+        session: Session = Depends(get_session),
     ):
         contract = _contract_or_404(session, contract_id)
         version = session.get(models.ContractVersion, version_id) if version_id else _current_version(session, contract)
+        if not version and not version_id:
+            return _pagination([], page, page_size, 0)
         if not version or version.contract_id != contract_id:
             raise ApiError(404, "not_found", f"Version {version_id} was not found for {contract_id}")
-        clauses = list(session.scalars(select(models.Clause).where(
-                                           models.Clause.version_id == version.id,
-                                           models.Clause.archived_at.is_(None),
-                                       )
-                                       .options(selectinload(models.Clause.tags).selectinload(models.ClauseTag.tag))
-                                       .order_by(models.Clause.position)))
+        clause_statement = select(models.Clause).where(models.Clause.version_id == version.id)
+        if not include_archived:
+            clause_statement = clause_statement.where(models.Clause.archived_at.is_(None))
+        clauses = list(session.scalars(
+            clause_statement.options(selectinload(models.Clause.tags).selectinload(models.ClauseTag.tag))
+            .order_by(models.Clause.position)
+        ))
         total = len(clauses)
         items = clauses[(page - 1) * page_size:page * page_size]
         return _pagination([_clause_dict(item, version.label) for item in items], page, page_size, total)

@@ -1,4 +1,16 @@
-@import "tailwindcss";
+*, *::before, *::after { box-sizing: border-box; }
+html { line-height: 1.5; -webkit-text-size-adjust: 100%; tab-size: 4; }
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+h1, h2, h3, h4, p, figure, blockquote, dl, dd { margin: 0; }
+ol, ul, menu { margin: 0; padding: 0; list-style: none; }
+button, input, optgroup, select, textarea { margin: 0; font: inherit; color: inherit; letter-spacing: inherit; }
+button, select { text-transform: none; }
+button, [role="button"] { cursor: pointer; }
+button { background: transparent; }
+fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
+table { border-collapse: collapse; border-color: inherit; text-indent: 0; }
+a { color: inherit; text-decoration: inherit; }
+img, svg { display: block; vertical-align: middle; }
 
 :root {
   font-family: Inter, Aptos, "Segoe UI", Arial, sans-serif;

@@ -50,6 +50,8 @@ The reviewer proposal objective is exactly: **maximize valid assignments first, 
 
 Detailed inputs, outputs, tie-breaking, limitations, and complexity derivations are in [backend/docs/algorithms.md](backend/docs/algorithms.md).
 
+Submission material is available in the editable [final project report](docs/Contract_Compliance_Final_Project_Report.docx) and the concise [demo and viva guide](docs/DEMO_VIVA_GUIDE.md). The report can be regenerated with `tools/build_project_report.py` using the bundled document runtime or any Python environment with `python-docx` installed.
+
 ## Deterministic demonstration dataset
 
 Resetting the database always recreates:

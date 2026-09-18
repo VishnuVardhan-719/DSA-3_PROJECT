@@ -40,6 +40,20 @@ test('contract creation dialog is usable and keyboard dismissible', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
 
+test('mobile navigation starts on the visible menu control and restores focus when closed', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/overview', { waitUntil: 'domcontentloaded' })
+
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused()
+  await page.getByRole('button', { name: 'Open navigation' }).click()
+  await expect(page.getByRole('button', { name: 'Close navigation' })).toBeFocused()
+
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toBeFocused()
+  await expect(page.getByRole('navigation', { name: 'Primary navigation' })).toHaveCount(0)
+})
+
 test('records review evidence and restores an archived clause', async ({ page }) => {
   await page.goto('/review-queue', { waitUntil: 'domcontentloaded' })
   await page.getByRole('button', { name: 'Approve' }).first().click()

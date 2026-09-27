@@ -1,4 +1,16 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000').replace(/\/$/, '')
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8100').replace(/\/$/, '')
+const ACTOR_STORAGE_KEY = 'contractWorkspaceActorId'
+
+/**
+ * Identity marker reported by `/health`. Any FastAPI service answers `/health`, so the
+ * workspace verifies this value to avoid rendering a neighbouring local service's data.
+ * Must match `SERVICE_ID` in backend/app/main.py.
+ */
+export const API_SERVICE_ID = 'contract-compliance-platform'
+
+function actorId() {
+  return localStorage.getItem(ACTOR_STORAGE_KEY) || 'USR-001'
+}
 
 export interface ApiErrorBody {
   error?: { code?: string; message?: string; details?: unknown }
@@ -40,7 +52,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const isFormData = init.body instanceof FormData
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: { Accept: 'application/json', ...(init.body && !isFormData ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
+    headers: { Accept: 'application/json', 'X-Actor-Id': actorId(), ...(init.body && !isFormData ? { 'Content-Type': 'application/json' } : {}), ...init.headers },
   })
   const body = response.status === 204 ? null : await response.json().catch(() => null)
   if (!response.ok) throw new ApiError(response.status, (body ?? {}) as ApiErrorBody)

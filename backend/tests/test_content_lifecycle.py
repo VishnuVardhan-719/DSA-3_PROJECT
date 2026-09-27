@@ -14,6 +14,7 @@ def client(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     reset_and_seed()
     with TestClient(create_app()) as test_client:
+        test_client.headers.update({"X-Actor-Id": "USR-001"})
         yield test_client
 
 

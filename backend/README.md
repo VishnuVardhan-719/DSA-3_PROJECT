@@ -37,10 +37,10 @@ Set-Location backend
 Set-Location backend
 ..\.venv\Scripts\python.exe -m pytest -q
 ..\.venv\Scripts\python.exe -c "from app.main import app; print(app.title)"
-..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8100
 ```
 
-Open `http://127.0.0.1:8000/docs` for the typed OpenAPI UI. Configure the frontend with `VITE_API_BASE_URL=http://127.0.0.1:8000`.
+Open `http://127.0.0.1:8100/docs` for the typed OpenAPI UI. The frontend defaults to `http://127.0.0.1:8100`; override it with `VITE_API_BASE_URL`. `/health` returns `{ status, database, service }`, and the `service` marker lets the client detect that an unrelated local service is answering on the configured port.
 
 Default CORS origins are `localhost` and `127.0.0.1` on ports 5173 and 5181. Override them with a comma-separated `CORS_ORIGINS` environment variable.
 

@@ -104,6 +104,49 @@ class ClauseObligation(Base):
     obligation: Mapped[Obligation] = relationship()
 
 
+class Playbook(Base):
+    __tablename__ = "playbooks"
+    id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    name: Mapped[str] = mapped_column(String(160))
+    version: Mapped[str] = mapped_column(String(30))
+    contract_type: Mapped[str] = mapped_column(String(80), default="")
+    jurisdiction: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    rules: Mapped[list["PlaybookRule"]] = relationship(back_populates="playbook", cascade="all, delete-orphan")
+    __table_args__ = (UniqueConstraint("name", "version"),)
+
+
+class PlaybookRule(Base):
+    __tablename__ = "playbook_rules"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    playbook_id: Mapped[str] = mapped_column(ForeignKey("playbooks.id"), index=True)
+    clause_category: Mapped[str] = mapped_column(String(160))
+    required_phrases_json: Mapped[str] = mapped_column(Text, default="[]")
+    prohibited_phrases_json: Mapped[str] = mapped_column(Text, default="[]")
+    risk: Mapped[str] = mapped_column(String(10))
+    remediation: Mapped[str] = mapped_column(Text)
+    playbook: Mapped[Playbook] = relationship(back_populates="rules")
+
+
+class Finding(Base):
+    __tablename__ = "findings"
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    contract_id: Mapped[str] = mapped_column(ForeignKey("contracts.id"), index=True)
+    version_id: Mapped[str] = mapped_column(ForeignKey("contract_versions.id"), index=True)
+    clause_id: Mapped[str | None] = mapped_column(ForeignKey("clauses.id"), nullable=True)
+    rule_id: Mapped[str] = mapped_column(ForeignKey("playbook_rules.id"), index=True)
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    risk: Mapped[str] = mapped_column(String(10), index=True)
+    evidence: Mapped[str] = mapped_column(Text)
+    remediation: Mapped[str] = mapped_column(Text)
+    override_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    overridden_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    __table_args__ = (UniqueConstraint("version_id", "rule_id"),)
+
+
 class Reviewer(Base):
     __tablename__ = "reviewers"
     id: Mapped[str] = mapped_column(String(16), primary_key=True)
@@ -172,11 +215,21 @@ class Setting(Base):
     value_json: Mapped[str] = mapped_column(Text)
 
 
+class User(Base):
+    __tablename__ = "users"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    role: Mapped[str] = mapped_column(String(30), index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     occurred_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     actor: Mapped[str] = mapped_column(String(100), index=True)
+    actor_id: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)
+    actor_role: Mapped[str | None] = mapped_column(String(30), nullable=True)
     action: Mapped[str] = mapped_column(String(100), index=True)
     entity_type: Mapped[str] = mapped_column(String(60))
     entity_id: Mapped[str] = mapped_column(String(32), index=True)

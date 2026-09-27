@@ -14,6 +14,7 @@ def client(tmp_path: Path):
     configure_database(f"sqlite:///{(tmp_path / 'test.db').as_posix()}")
     reset_and_seed()
     with TestClient(create_app()) as test_client:
+        test_client.headers.update({"X-Actor-Id": "USR-001"})
         yield test_client
 
 
@@ -29,7 +30,7 @@ def test_seed_counts_are_deterministic(client):
 
 
 def test_health_dashboard_and_paginated_contract_filters(client):
-    assert client.get("/health").json() == {"status": "ok", "database": "ok"}
+    assert client.get("/health").json() == {"status": "ok", "database": "ok", "service": "contract-compliance-platform"}
     response = client.get("/contracts", params={"page": 1, "pageSize": 3, "department": "Legal"})
     assert response.status_code == 200
     payload = response.json()
@@ -172,3 +173,109 @@ def test_audit_events_are_append_only(client):
         with pytest.raises(ValueError, match="append-only"):
             session.commit()
         session.rollback()
+
+
+def test_clause_search_exposes_inverted_index_matched_terms(client):
+    response = client.post("/clause-search", json={"query": "retention notice", "mode": "OR", "pageSize": 5})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] > 0
+    for item in payload["items"]:
+        assert item["matchedTerms"]
+        assert set(item["matchedTerms"]) <= {"retention", "notice"}
+        assert set(item["termFrequency"]) == set(item["matchedTerms"])
+        assert all(count >= 1 for count in item["termFrequency"].values())
+    assert payload["items"][0]["match"] == "retention notice"
+
+    conjunction = client.post("/clause-search", json={"query": "retention notice", "mode": "AND", "pageSize": 5})
+    assert conjunction.status_code == 200
+    assert conjunction.json()["total"] <= payload["total"]
+    assert client.post("/clause-search", json={"query": "zzzznotpresent", "pageSize": 5}).json()["total"] == 0
+    assert client.post("/clause-search", json={"query": "   ", "pageSize": 5}).status_code == 422
+    assert client.get("/clauses/search", params={"q": "   "}).status_code == 422
+
+
+def test_version_comparison_returns_summary_counts_and_word_level_spans(client):
+    versions = client.get("/contracts/CTR-002").json()["versions"]
+    response = client.post("/version-comparisons", json={
+        "contractId": "CTR-002", "baseVersionId": versions[-1]["id"], "targetVersionId": versions[0]["id"],
+    })
+    assert response.status_code == 200
+    payload = response.json()
+    summary = payload["summary"]
+    assert set(summary) == {"added", "removed", "modified", "unchanged", "total"}
+    assert summary["total"] == sum(summary[key] for key in ("added", "removed", "modified", "unchanged"))
+    assert summary["total"] == len(payload["changes"])
+
+    kinds = [change["kind"] for change in payload["changes"]]
+    assert {"Added", "Removed", "Modified"} <= set(kinds)
+    modified = [change for change in payload["changes"] if change["kind"] == "Modified"][0]
+    assert modified["commonWords"]
+    assert modified["spans"]
+    assert {span["op"] for span in modified["spans"]} <= {"equal", "insert", "delete"}
+    assert any(span["op"] in {"insert", "delete"} for span in modified["spans"])
+
+    identical = client.post("/version-comparisons", json={
+        "contractId": "CTR-002", "baseVersionId": versions[0]["id"], "targetVersionId": versions[0]["id"],
+    })
+    assert identical.status_code == 200
+    identical_summary = identical.json()["summary"]
+    assert identical_summary["added"] == identical_summary["removed"] == identical_summary["modified"] == 0
+    assert identical_summary["unchanged"] == identical_summary["total"] > 0
+    assert {change["kind"] for change in identical.json()["changes"]} == {"Unchanged"}
+
+
+def test_coverage_endpoint_returns_greedy_selection_steps(client):
+    response = client.post("/compliance/coverage", json={"contractId": "CTR-001"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["method"] == "Greedy Set Cover approximation (not guaranteed optimal)"
+    assert payload["total"] == 10
+    assert set(payload["selectedClauses"]) <= set(payload["clauseCoverage"])
+    assert payload["steps"]
+    assert [step["step"] for step in payload["steps"]] == list(range(1, len(payload["steps"]) + 1))
+    covered_so_far: list[str] = []
+    for index, step in enumerate(payload["steps"]):
+        assert step["clauseId"] in payload["selectedClauses"]
+        assert step["newlyCovered"]
+        assert step["coveredCount"] == len(step["newlyCovered"])
+        covered_so_far.extend(step["newlyCovered"])
+        assert step["uncoveredCount"] + len(covered_so_far) == payload["total"]
+        if index < len(payload["steps"]) - 1:
+            assert step["uncoveredCount"] > 0
+    # Greedy never re-selects an obligation, so the step log explains full coverage exactly.
+    assert len(set(covered_so_far)) == len(covered_so_far) == payload["covered"]
+    assert payload["status"] == ("Complete Coverage" if not payload["uncoveredObligationIds"] else "Partial Coverage")
+
+
+def test_similarity_graph_reports_threshold_dependent_edges_and_isolates(client):
+    high = client.post("/similarity/graph", json={"threshold": 0.9}).json()
+    low = client.post("/similarity/graph", json={"threshold": 0.05}).json()
+    assert high["threshold"] == 0.9
+    assert high["comparedPairs"] == 12 * 11 // 2 == low["comparedPairs"]
+    assert len(low["edges"]) >= len(high["edges"])
+    assert len(low["isolatedContractIds"]) <= len(high["isolatedContractIds"])
+    assert all(edge["score"] >= 0.9 for edge in high["edges"])
+    assert all(edge["score"] >= 0.05 for edge in low["edges"])
+    assert {node["id"] for node in low["nodes"]} == {f"CTR-{index:03d}" for index in range(1, 13)}
+    assert low["isolatedContractIds"] == sorted(low["isolatedContractIds"])
+
+
+def test_assignment_proposal_returns_explanations_loads_and_unassigned_reasons(client):
+    response = client.post("/reviewer-assignments/propose", json={"contractIds": ["CTR-001", "CTR-002"]})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["objective"] == "maximize valid assignments first, then minimize workload/expertise cost"
+    assert set(payload["reviewerLoads"][0]) == {"reviewerId", "capacity", "existingWorkload", "proposedCount",
+                                               "projectedLoad", "remainingCapacity"}
+    for assignment in payload["assignments"]:
+        assert "Matched expertise" in assignment["explanation"]
+        assert "cost" in assignment["explanation"]
+        assert assignment["confidence"] in {"Strong fit", "Good fit"}
+    assert len(payload["reviewerLoads"]) == 6
+    assert payload["eligiblePairs"] >= payload["assignedCount"]
+    assert payload["assignedCount"] == len(payload["assignments"])
+    assert sorted(item["contractId"] for item in payload["unassigned"]) == sorted(payload["unassignedContractIds"])
+    for item in payload["unassigned"]:
+        assert item["reason"].startswith(("No active reviewer", "All "))
+    assert client.post("/reviewer-assignments/propose", json={"contractIds": ["CTR-999"]}).status_code == 404

@@ -1,0 +1,19 @@
+import { Play, ShieldAlert } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { api, listFrom } from '../api/client'
+import { useResource } from '../api/useResource'
+import { AsyncState, Badge, Button, PageHeader, Panel, Select } from '../components/ui'
+import type { Contract, Finding, Playbook } from '../types/domain'
+
+const EMPTY_PLAYBOOKS: Playbook[] = []
+const EMPTY_CONTRACTS: Contract[] = []
+
+export function PlaybooksPage() {
+  const resource = useResource(async (signal) => ({ playbooks: listFrom<Playbook>(await api.get('/playbooks', signal)), contracts: listFrom<Contract>(await api.get('/contracts?page=1&pageSize=100', signal)) }), [])
+  const [playbookId, setPlaybookId] = useState(''); const [contractId, setContractId] = useState(''); const [findings, setFindings] = useState<Finding[]>([]); const [error, setError] = useState(''); const [running, setRunning] = useState(false)
+  const playbooks = resource.data?.playbooks ?? EMPTY_PLAYBOOKS; const contracts = resource.data?.contracts ?? EMPTY_CONTRACTS
+  const selected = useMemo(() => playbooks.find(item => item.id === playbookId) ?? playbooks[0], [playbooks, playbookId])
+  const applicable = contracts.filter(contract => !selected?.contractType || contract.type.toLowerCase() === selected.contractType.toLowerCase())
+  const run = async () => { if (!selected || !contractId) return; setRunning(true); setError(''); try { const result = await api.post<{ findings: Finding[] }>(`/playbooks/${encodeURIComponent(selected.id)}/analyze`, { contractId }); setFindings(result.findings) } catch (reason) { setError(reason instanceof Error ? reason.message : 'Unable to analyze contract') } finally { setRunning(false) } }
+  return <><PageHeader title="Compliance Playbooks" description="Run versioned deterministic rules against the current contract version and route high-risk deviations to review." /><AsyncState loading={resource.loading} error={resource.error} empty={!playbooks.length} onRetry={resource.retry}><div className="coverage-layout"><Panel title="Active playbook" description="Rules match clause category text and required or prohibited phrases."><div className="form-grid"><Select label="Playbook" value={selected?.id ?? ''} onChange={event => { setPlaybookId(event.target.value); setContractId(''); setFindings([]) }}>{playbooks.map(item => <option key={item.id} value={item.id}>{item.name} · {item.version} ({item.status})</option>)}</Select><Select label="Contract" value={contractId} onChange={event => setContractId(event.target.value)}><option value="">Choose a compatible contract</option>{applicable.map(item => <option key={item.id} value={item.id}>{item.name} · {item.currentVersion}</option>)}</Select></div>{selected && <div className="selected-clauses">{selected.rules.map(rule => <span key={rule.id}>{rule.clauseCategory} · {rule.risk}</span>)}</div>}<Button disabled={!contractId || running || selected?.status !== 'Active'} onClick={run}><Play size={16} />{running ? 'Analyzing…' : 'Analyze current version'}</Button>{error && <p className="state-error" role="alert">{error}</p>}</Panel><Panel title="Findings" description="High-risk findings create or reuse one open review item.">{findings.length ? <div className="step-list">{findings.map(finding => <article key={finding.id} className="step-body"><div className="result-head"><strong>{finding.risk} risk</strong><Badge tone={finding.status === 'Compliant' ? 'compliant' : finding.status === 'Exception' ? 'exception' : 'needs-review'}>{finding.status}</Badge></div><p><ShieldAlert size={15} /> {finding.evidence}</p><small>{finding.remediation}</small>{finding.overrideNotes && <small>Legal exception: {finding.overrideNotes}</small>}</article>)}</div> : <p className="muted">Select an active playbook and compatible contract, then analyze its current version.</p>}</Panel></div></AsyncState></>
+}

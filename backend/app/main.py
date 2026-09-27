@@ -15,7 +15,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from .algorithms.alignment import align_clause_sequences
+from .algorithms.alignment import analyze_version_diff
 from .algorithms.assignment import propose_assignments as run_assignment
 from .algorithms.coverage import greedy_set_cover
 from .algorithms.search import InvertedIndex
@@ -25,14 +25,20 @@ from . import models, schemas
 from .api.contracts import router as contract_mutation_router
 from .api.clauses import router as clause_mutation_router, version_router as version_clause_router
 from .api.obligations import router as obligation_router
+from .api.playbooks import router as playbook_router
 from .api.reviewers import router as reviewer_mutation_router
 from .api.versions import router as version_mutation_router
 from .errors import ApiError
 from .seed import seed_if_empty
 from .services.lifecycle import audit_event as _audit, contract_or_404 as _contract_or_404
+from .services.access import MUTATION_METHODS, current_actor, require_mutation_role, reset_current_actor, resolve_actor, set_current_actor
 
 
 ASSIGNMENT_OBJECTIVE = "maximize valid assignments first, then minimize workload/expertise cost"
+
+# Identity marker returned by /health so the client can detect that another local
+# service, rather than this API, is answering on the configured port.
+SERVICE_ID = "contract-compliance-platform"
 
 
 def _error_payload(code: str, message: str, details=None) -> dict:
@@ -53,7 +59,8 @@ def _version_dict(version: models.ContractVersion) -> dict:
             "sequence": version.sequence}
 
 
-def _clause_dict(clause: models.Clause, version_label: str | None = None, matched: str | None = None) -> dict:
+def _clause_dict(clause: models.Clause, version_label: str | None = None, matched: str | None = None,
+                 matched_terms: list[str] | None = None, term_frequency: dict[str, int] | None = None) -> dict:
     label = version_label or clause.version.label
     return {
         "id": clause.clause_key, "clause_key": clause.clause_key, "contract_id": clause.contract_id,
@@ -61,6 +68,7 @@ def _clause_dict(clause: models.Clause, version_label: str | None = None, matche
         "status": clause.status, "tags": sorted(item.tag.name for item in clause.tags),
         "page_number": clause.page_number, "tier": clause.tier, "guidance": clause.guidance,
         "source_section": clause.source_section, "matched_text": clause.text if matched else None, "match": matched,
+        "matched_terms": matched_terms or [], "term_frequency": term_frequency or {},
         "archived_at": clause.archived_at, "updated_at": clause.updated_at,
     }
 
@@ -106,12 +114,32 @@ def create_app() -> FastAPI:
     origins = [value.strip() for value in os.getenv("CORS_ORIGINS", ",".join(default_origins)).split(",") if value.strip()]
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
                        allow_methods=["GET", "POST", "PUT", "PATCH", "OPTIONS"], allow_headers=["*"])
+
+    @app.middleware("http")
+    async def authorize_mutations(request: Request, call_next):
+        if request.method not in MUTATION_METHODS or request.url.path in {
+            "/clause-search", "/version-comparisons", "/similarity/graph", "/compliance/coverage", "/reviewer-assignments/propose",
+        }:
+            return await call_next(request)
+        try:
+            with next(get_session()) as session:
+                actor = resolve_actor(session, request.headers.get("X-Actor-Id"))
+                require_mutation_role(actor, request.url.path)
+        except ApiError as error:
+            return JSONResponse(status_code=error.status_code,
+                                content=_error_payload(error.code, error.message, error.details))
+        token = set_current_actor(actor)
+        try:
+            return await call_next(request)
+        finally:
+            reset_current_actor(token)
     app.include_router(contract_mutation_router)
     app.include_router(version_mutation_router)
     app.include_router(clause_mutation_router)
     app.include_router(version_clause_router)
     app.include_router(obligation_router)
     app.include_router(reviewer_mutation_router)
+    app.include_router(playbook_router)
 
     @app.exception_handler(ApiError)
     async def handle_api_error(_request: Request, error: ApiError):
@@ -128,7 +156,7 @@ def create_app() -> FastAPI:
     @app.get("/health", response_model=schemas.Health, tags=["system"])
     def health(session: Session = Depends(get_session)):
         session.execute(select(1))
-        return {"status": "ok", "database": "ok"}
+        return {"status": "ok", "database": "ok", "service": SERVICE_ID}
 
     @app.get("/dashboard/summary", response_model=schemas.DashboardSummary, tags=["dashboard"])
     def dashboard_summary(session: Session = Depends(get_session)):
@@ -269,6 +297,9 @@ def create_app() -> FastAPI:
         contract_id: str | None = Query(None, alias="contractId"), status_filter: str | None = Query(None, alias="status"),
         tier: str | None = None, session: Session = Depends(get_session),
     ):
+        q = q.strip()
+        if not q:
+            raise ApiError(422, "validation_error", "Query must contain at least one non-whitespace character")
         contracts = list(session.scalars(select(models.Contract).where(
             models.Contract.archived_at.is_(None)
         ).order_by(models.Contract.id)))
@@ -276,17 +307,16 @@ def create_app() -> FastAPI:
         by_id = {clause.id: clause for clause in clauses}
         index = InvertedIndex({clause.id: f"{clause.title} {clause.text} {' '.join(item.tag.name for item in clause.tags)}"
                                for clause in clauses})
-        matches = [by_id[item_id] for item_id in index.search(q, mode)]
-        if contract_id:
-            matches = [item for item in matches if item.contract_id == contract_id]
-        if status_filter:
-            matches = [item for item in matches if item.status == status_filter]
-        if tier:
-            matches = [item for item in matches if item.tier == tier]
-        total = len(matches)
+        hits = [hit for hit in index.search_with_terms(q, mode)
+                if (contract_id is None or by_id[hit["id"]].contract_id == contract_id)
+                and (status_filter is None or by_id[hit["id"]].status == status_filter)
+                and (tier is None or by_id[hit["id"]].tier == tier)]
+        total = len(hits)
         versions = {contract.id: contract.current_version for contract in contracts}
-        sliced = matches[(page - 1) * page_size:page * page_size]
-        return _pagination([_clause_dict(item, versions[item.contract_id], q) for item in sliced], page, page_size, total)
+        sliced = hits[(page - 1) * page_size:page * page_size]
+        return _pagination([_clause_dict(by_id[hit["id"]], versions[by_id[hit["id"]].contract_id], q,
+                                         hit["matched_terms"], hit["term_frequency"]) for hit in sliced],
+                           page, page_size, total)
 
     @app.post("/clause-search", response_model=schemas.Page[schemas.ClauseOut], tags=["clauses"])
     def search_clauses_post(payload: schemas.ClauseSearchRequest, session: Session = Depends(get_session)):
@@ -309,8 +339,9 @@ def create_app() -> FastAPI:
                                                     models.Clause.archived_at.is_(None),
                                                 )
                                                 .order_by(models.Clause.position))]
+        analysis = analyze_version_diff(sequence(base.id), sequence(target.id))
         return {"contract_id": contract_id, "base_version": _version_dict(base), "target_version": _version_dict(target),
-                "changes": align_clause_sequences(sequence(base.id), sequence(target.id))}
+                "changes": analysis["changes"], "summary": analysis["summary"]}
 
     @app.post("/version-comparisons", response_model=schemas.ComparisonOut, tags=["analysis"])
     def compare_versions_post(payload: schemas.VersionComparisonRequest, session: Session = Depends(get_session)):
@@ -329,7 +360,9 @@ def create_app() -> FastAPI:
         cluster_by_id = {node: index + 1 for index, component in enumerate(components) for node in component}
         names = {contract.id: contract.name for contract in contracts}
         return {"threshold": threshold, "nodes": [{"id": item, "name": names[item], "cluster": cluster_by_id[item]}
-                                                      for item in ids], "edges": edges, "components": components}
+                                                      for item in ids], "edges": edges, "components": components,
+                "isolated_contract_ids": [item for item in ids if not graph.get(item)],
+                "compared_pairs": len(ids) * (len(ids) - 1) // 2}
 
     @app.post("/similarity/graph", response_model=schemas.SimilarityGraphOut, tags=["analysis"])
     def similarity_graph_post(payload: schemas.SimilarityGraphRequest, session: Session = Depends(get_session)):
@@ -353,8 +386,11 @@ def create_app() -> FastAPI:
             "obligations": [{"id": item.id, "name": item.name, "category": item.category,
                              "description": item.description, "clauses": sorted(mapped[item.id])} for item in obligations],
             "selected_clauses": result["selected"], "covered": len(result["covered"]), "total": len(obligations),
-            "status": "Complete Coverage" if not result["uncovered"] else "Partial Coverage",
+            "status": result["coverage_status"],
             "uncovered_obligation_ids": result["uncovered"],
+            "steps": result["steps"],
+            "clause_coverage": result["clause_coverage"],
+            "method": "Greedy Set Cover approximation (not guaranteed optimal)",
         }
 
     @app.post("/compliance/coverage", response_model=schemas.CoverageOut, tags=["analysis"])
@@ -383,15 +419,15 @@ def create_app() -> FastAPI:
         total = len(items)
         return _pagination(items[(page - 1) * page_size:page * page_size], page, page_size, total)
 
-    @app.get("/reviewer-assignments", response_model=schemas.Page[dict], tags=["reviewers"])
+    @app.get("/reviewer-assignments", response_model=schemas.Page[schemas.AssignmentOut], tags=["reviewers"])
     def assignments(page: int = Query(1, ge=1), page_size: int = Query(20, alias="pageSize", ge=1, le=100),
                     session: Session = Depends(get_session)):
         total = session.scalar(select(func.count()).select_from(models.Assignment))
         rows = list(session.scalars(select(models.Assignment).order_by(models.Assignment.contract_id)
                                     .offset((page - 1) * page_size).limit(page_size)))
-        return _pagination([{"id": row.id, "contractId": row.contract_id, "reviewerId": row.reviewer_id,
-                             "confidence": row.confidence, "cost": row.cost, "createdAt": row.created_at} for row in rows],
-                           page, page_size, total)
+        return _pagination([{"id": row.id, "contract_id": row.contract_id, "reviewer_id": row.reviewer_id,
+                             "confidence": row.confidence, "cost": row.cost, "created_at": row.created_at}
+                            for row in rows], page, page_size, total)
 
     @app.post(
         "/reviewer-assignments/propose", response_model=schemas.ProposalOut, tags=["reviewers"],
@@ -471,8 +507,8 @@ def create_app() -> FastAPI:
             session.add(row)
             _audit(session, "System", "Review Assigned", "Contract", item.contract_id,
                    f"Assigned to {item.reviewer_id}")
-            created.append({"id": row.id, "contractId": row.contract_id, "reviewerId": row.reviewer_id,
-                            "confidence": row.confidence, "cost": row.cost, "createdAt": row.created_at})
+            created.append({"id": row.id, "contract_id": row.contract_id, "reviewer_id": row.reviewer_id,
+                            "confidence": row.confidence, "cost": row.cost, "created_at": row.created_at})
         try:
             session.commit()
         except IntegrityError:
@@ -534,13 +570,14 @@ def create_app() -> FastAPI:
         if session.scalar(select(models.ReviewDecision).where(models.ReviewDecision.review_id == review_id)):
             raise ApiError(409, "decision_conflict", "A decision already exists for this review")
         number = (session.scalar(select(func.count()).select_from(models.ReviewDecision)) or 0) + 1
+        actor = current_actor()
         decision = models.ReviewDecision(id=f"DEC-{number:06d}", review_id=review_id,
                                          decision=payload.decision, notes=payload.notes,
-                                         decided_by=payload.decided_by, decided_at=datetime.now())
+                                          decided_by=actor.name if actor else payload.decided_by, decided_at=datetime.now())
         session.add(decision)
         review.status = "Completed" if payload.decision in {"Approved", "Rejected"} else "Needs Clarification"
         review.updated_at = decision.decided_at
-        _audit(session, payload.decided_by, "Review Decision", "Review", review_id, payload.decision,
+        _audit(session, decision.decided_by, "Review Decision", "Review", review_id, payload.decision,
                "Approved" if payload.decision == "Approved" else "Completed")
         session.commit()
         return decision
@@ -574,7 +611,8 @@ def create_app() -> FastAPI:
         total = session.scalar(select(func.count()).select_from(statement.subquery()))
         rows = list(session.scalars(statement.order_by(models.AuditEvent.occurred_at.desc(), models.AuditEvent.id.desc())
                                     .offset((page - 1) * page_size).limit(page_size)))
-        items = [{"id": row.id, "timestamp": row.occurred_at, "user": row.actor, "action": row.action,
+        items = [{"id": row.id, "timestamp": row.occurred_at, "user": row.actor, "actor_id": row.actor_id,
+                  "actor_role": row.actor_role, "action": row.action,
                   "entity": row.entity_id, "entity_type": row.entity_type, "detail": row.detail,
                   "status": row.status} for row in rows]
         return _pagination(items, page, page_size, total)

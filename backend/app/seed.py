@@ -94,6 +94,26 @@ def initialize_database() -> None:
     run_migrations()
 
 
+def ensure_baseline_playbook(session) -> None:
+    if session.get(models.Playbook, "PBK-000001"):
+        return
+    playbook = models.Playbook(id="PBK-000001", name="Privacy Baseline", version="2026.1", contract_type="Privacy", status="Active")
+    playbook.rules.append(models.PlaybookRule(id="PBK-000001-R01", clause_category="Breach Notification",
+        required_phrases_json=json.dumps(["within 72 hours"]), prohibited_phrases_json="[]", risk="High",
+        remediation="Require a 72-hour notification commitment."))
+    session.add(playbook)
+
+
+def ensure_local_actors(session) -> None:
+    for actor_id, name, role in [
+        ("USR-001", "Asha Menon", "Administrator"),
+        ("USR-002", "Rahul Verma", "Legal Reviewer"),
+        ("USR-003", "Priya Nair", "Read Only"),
+    ]:
+        if not session.get(models.User, actor_id):
+            session.add(models.User(id=actor_id, name=name, role=role, active=True))
+
+
 def seed_database() -> None:
     initialize_database()
     with database.SessionLocal() as session:
@@ -169,6 +189,8 @@ def seed_database() -> None:
         expertise_names = sorted({name for reviewer in REVIEWERS for name in reviewer[5]})
         expertise = {name: models.Expertise(id=f"EXP-{index:02d}", name=name) for index, name in enumerate(expertise_names, 1)}
         session.add_all(expertise.values())
+        ensure_local_actors(session)
+        ensure_baseline_playbook(session)
         for reviewer_id, name, role, workload, capacity, skills in REVIEWERS:
             reviewer = models.Reviewer(id=reviewer_id, name=name, role=role, workload=workload, capacity=capacity)
             reviewer.expertise.extend(models.ReviewerExpertise(expertise=expertise[skill]) for skill in skills)
@@ -226,6 +248,11 @@ def seed_if_empty() -> None:
         empty = not session.scalar(select(func.count()).select_from(models.Contract))
     if empty:
         seed_database()
+        return
+    with database.SessionLocal() as session:
+        ensure_baseline_playbook(session)
+        ensure_local_actors(session)
+        session.commit()
 
 
 def database_counts() -> dict[str, int]:

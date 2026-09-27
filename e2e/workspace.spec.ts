@@ -7,6 +7,7 @@ const routes = [
   ['/version-analysis', 'Version Analysis'],
   ['/similarity-clustering', 'Similarity'],
   ['/compliance-coverage', 'Compliance Coverage'],
+  ['/playbooks', 'Compliance Playbooks'],
   ['/reviewer-assignment', 'Reviewer Assignment'],
   ['/review-queue', 'Review Queue'],
   ['/audit-trail', 'Audit Trail'],
@@ -19,6 +20,32 @@ test('all primary workspace routes render without an application error', async (
     await expect(page.getByRole('heading', { name: new RegExp(heading, 'i'), level: 1 })).toBeVisible()
     await expect(page.getByText('This view could not be displayed')).toHaveCount(0)
   }
+})
+
+test('algorithm workbenches expose backend audit metadata', async ({ page }) => {
+  await page.goto('/clause-search', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByText(/indexed clauses/).first()).toBeVisible()
+  const searchResponse = page.waitForResponse(response => response.url().includes('/clause-search') && response.request().method() === 'POST')
+  await page.getByLabel('Search indexed clauses').fill('retention notice')
+  await searchResponse
+  await expect(page.getByText('Matched terms').first()).toBeVisible()
+  await expect(page.getByText(/retention \(\d+\)/).first()).toBeVisible()
+
+  await page.goto('/similarity-clustering', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByText('Compared pairs')).toBeVisible()
+  await expect(page.getByText('Connected components', { exact: true })).toBeVisible()
+  await expect(page.getByText('Isolated contracts')).toBeVisible()
+
+  await page.goto('/reviewer-assignment', { waitUntil: 'domcontentloaded' })
+  await page.getByRole('button', { name: 'Generate proposal' }).click()
+  await expect(page.getByText('Total assignment cost')).toBeVisible()
+  await expect(page.getByText('Eligible reviewer pairs')).toBeVisible()
+  await expect(page.getByText(/Projected load:/).first()).toBeVisible()
+
+  await page.goto('/compliance-coverage', { waitUntil: 'domcontentloaded' })
+  await expect(page.getByRole('heading', { name: 'Greedy selection sequence' })).toBeVisible()
+  await expect(page.getByText(/not guaranteed optimal/i)).toBeVisible()
+
 })
 
 test('contract register pagination opens a persisted contract record', async ({ page }) => {

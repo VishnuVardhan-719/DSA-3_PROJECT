@@ -13,6 +13,7 @@ def client(tmp_path: Path):
     configure_database(f"sqlite:///{(tmp_path / 'lifecycle.db').as_posix()}")
     reset_and_seed()
     with TestClient(create_app()) as test_client:
+        test_client.headers.update({"X-Actor-Id": "USR-001"})
         yield test_client
 
 

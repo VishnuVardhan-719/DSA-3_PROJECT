@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Generic, Literal, TypeVar
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 def to_camel(value: str) -> str:
@@ -43,6 +43,7 @@ class Page(ApiModel, Generic[T]):
 class Health(ApiModel):
     status: str
     database: str
+    service: str
 
 
 class ContractSummary(ApiModel):
@@ -90,6 +91,12 @@ class ContractCreate(InputModel):
         if self.expiry_date < self.effective_date:
             raise ValueError("expiryDate must not be before effectiveDate")
         return self
+
+
+class DatasetImportResult(ApiModel):
+    imported: int
+    contract_ids: list[str]
+    filename: str
 
 
 class ContractUpdate(InputModel):
@@ -160,6 +167,71 @@ class VersionCreate(InputModel):
     clauses: list[ClauseCreate] = Field(min_length=1, max_length=500)
 
 
+class PlaybookRuleCreate(InputModel):
+    clause_category: str = Field(min_length=2, max_length=160)
+    required_phrases: list[str] = Field(default_factory=list, max_length=20)
+    prohibited_phrases: list[str] = Field(default_factory=list, max_length=20)
+    risk: Literal["Low", "Medium", "High"]
+    remediation: str = Field(min_length=1, max_length=5000)
+
+
+class PlaybookCreate(InputModel):
+    name: str = Field(min_length=2, max_length=160)
+    version: str = Field(min_length=1, max_length=30)
+    contract_type: str = Field(default="", max_length=80)
+    jurisdiction: str = Field(default="", max_length=120)
+    status: Literal["Draft", "Active", "Archived"] = "Draft"
+    rules: list[PlaybookRuleCreate] = Field(min_length=1, max_length=100)
+
+
+class PlaybookRuleOut(ApiModel):
+    id: str
+    clause_category: str
+    required_phrases: list[str]
+    prohibited_phrases: list[str]
+    risk: str
+    remediation: str
+
+
+class PlaybookOut(ApiModel):
+    id: str
+    name: str
+    version: str
+    contract_type: str
+    jurisdiction: str
+    status: str
+    rules: list[PlaybookRuleOut]
+
+
+class PlaybookAnalysisRequest(InputModel):
+    contract_id: str
+
+
+class FindingOut(ApiModel):
+    id: str
+    contract_id: str
+    version_id: str
+    clause_id: str | None
+    rule_id: str
+    status: str
+    risk: str
+    evidence: str
+    remediation: str
+    override_notes: str | None
+    overridden_at: datetime | None
+
+
+class PlaybookAnalysisOut(ApiModel):
+    playbook_id: str
+    contract_id: str
+    version_id: str
+    findings: list[FindingOut]
+
+
+class FindingOverride(InputModel):
+    notes: str = Field(min_length=1, max_length=2000)
+
+
 class ClauseUpdate(InputModel):
     updated_at: datetime
     title: str | None = Field(default=None, min_length=2, max_length=160)
@@ -217,6 +289,8 @@ class ClauseOut(ApiModel):
     source_section: str
     matched_text: str | None = None
     match: str | None = None
+    matched_terms: list[str] = Field(default_factory=list)
+    term_frequency: dict[str, int] = Field(default_factory=dict)
     archived_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -234,6 +308,14 @@ class ClauseSearchRequest(InputModel):
     contract_id: str | None = None
     status: str | None = None
     tier: str | None = None
+
+    @field_validator("query")
+    @classmethod
+    def require_searchable_query(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("query must contain at least one non-whitespace character")
+        return normalized
 
 
 class VersionComparisonRequest(InputModel):
@@ -257,34 +339,101 @@ class DashboardPortfolio(ApiModel):
     open_reviews: int
 
 
+class DashboardReviewItem(ApiModel):
+    id: str
+    contract_id: str
+    contract: str
+    issue: str
+    priority: str
+    due: date
+    status: str
+
+
 class DashboardSummary(ApiModel):
     portfolio: DashboardPortfolio
     recent_contracts: list[ContractSummary]
-    review_queue: list[dict]
+    review_queue: list[DashboardReviewItem]
+
+
+class ClauseChangeSpan(ApiModel):
+    op: Literal["equal", "insert", "delete"]
+    words: list[str]
+
+
+class ClauseChange(ApiModel):
+    clause_key: str
+    kind: Literal["Added", "Removed", "Modified", "Unchanged"]
+    before: str | None = None
+    after: str | None = None
+    common_words: list[str] = Field(default_factory=list)
+    spans: list[ClauseChangeSpan] = Field(default_factory=list)
+
+
+class ComparisonSummary(ApiModel):
+    added: int
+    removed: int
+    modified: int
+    unchanged: int
+    total: int
 
 
 class ComparisonOut(ApiModel):
     contract_id: str
     base_version: VersionOut
     target_version: VersionOut
-    changes: list[dict]
+    changes: list[ClauseChange]
+    summary: ComparisonSummary
+
+
+class SimilarityNode(ApiModel):
+    id: str
+    name: str
+    cluster: int
+
+
+class SimilarityEdge(ApiModel):
+    source: str
+    target: str
+    score: float
 
 
 class SimilarityGraphOut(ApiModel):
     threshold: float
-    nodes: list[dict]
-    edges: list[dict]
+    nodes: list[SimilarityNode]
+    edges: list[SimilarityEdge]
     components: list[list[str]]
+    isolated_contract_ids: list[str]
+    compared_pairs: int
+
+
+class CoverageObligation(ApiModel):
+    id: str
+    name: str
+    category: str
+    description: str
+    clauses: list[str]
+
+
+class CoverageStep(ApiModel):
+    step: int
+    clause_id: str
+    newly_covered: list[str]
+    covered_count: int
+    uncovered_count: int
+    uncovered_after: list[str]
 
 
 class CoverageOut(ApiModel):
     contract_id: str
-    obligations: list[dict]
+    obligations: list[CoverageObligation]
     selected_clauses: list[str]
     covered: int
     total: int
     status: Literal["Complete Coverage", "Partial Coverage"]
     uncovered_obligation_ids: list[str]
+    steps: list[CoverageStep]
+    clause_coverage: dict[str, list[str]]
+    method: str
 
 
 class ReviewerOut(ApiModel):
@@ -323,6 +472,30 @@ class AssignmentItem(InputModel):
     reviewer_id: str
     cost: int = Field(ge=0)
     confidence: Literal["Strong fit", "Good fit"]
+    explanation: str = Field(default="", max_length=500)
+
+
+class AssignmentOut(ApiModel):
+    id: str
+    contract_id: str
+    reviewer_id: str
+    cost: int
+    confidence: str
+    created_at: datetime
+
+
+class UnassignedContract(ApiModel):
+    contract_id: str
+    reason: str
+
+
+class ReviewerLoad(ApiModel):
+    reviewer_id: str
+    capacity: int
+    existing_workload: int
+    proposed_count: int
+    projected_load: int
+    remaining_capacity: int
 
 
 class ProposalOut(ApiModel):
@@ -330,6 +503,9 @@ class ProposalOut(ApiModel):
     assigned_count: int
     total_cost: int
     unassigned_contract_ids: list[str]
+    unassigned: list[UnassignedContract]
+    reviewer_loads: list[ReviewerLoad]
+    eligible_pairs: int
     objective: str
 
 
@@ -338,7 +514,7 @@ class ConfirmAssignments(InputModel):
 
 
 class ConfirmedAssignments(ApiModel):
-    assignments: list[dict]
+    assignments: list[AssignmentOut]
 
 
 class ReviewOut(ApiModel):
@@ -377,6 +553,8 @@ class AuditEventOut(ApiModel):
     id: str
     timestamp: datetime
     user: str
+    actor_id: str | None
+    actor_role: str | None
     action: str
     entity: str
     entity_type: str

@@ -338,9 +338,8 @@ def build() -> None:
         "npm install",
         "Set-Location backend",
         "..\\.venv\\Scripts\\python.exe -m app.seed reset",
-        "..\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000",
+        "..\\.venv\\Scripts\\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8100",
         "# In a second terminal at the repository root",
-        "$env:VITE_API_BASE_URL = 'http://127.0.0.1:8000'",
         "npm run dev -- --host 127.0.0.1 --port 5181",
     ])
 

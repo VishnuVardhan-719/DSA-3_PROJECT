@@ -1,4 +1,17 @@
-"""TF-IDF, cosine similarity, threshold graphs, and DFS components."""
+"""TF-IDF, cosine similarity, threshold graphs, and DFS components.
+
+For ``N`` documents containing ``T`` total tokens and vocabulary size ``V``:
+
+* TF-IDF construction is ``O(T)`` time and ``O(NV)`` worst-case space.
+* One sparse cosine comparison is ``O(min(V_left, V_right))`` for the dot
+  product plus both vector-size norm scans.
+* The full matrix performs ``N²`` comparisons, giving ``O(N²V)`` worst-case
+  time and ``O(N²)`` matrix space.
+* Threshold-graph construction scans the upper triangle in ``O(N²)`` time;
+  iterative DFS is ``O(N + E)`` time and space for ``E`` retained edges.
+
+Sorted document IDs, edges, neighbors, and components keep output stable.
+"""
 
 from collections import Counter
 import math

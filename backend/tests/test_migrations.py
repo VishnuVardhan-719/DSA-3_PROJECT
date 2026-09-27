@@ -17,6 +17,8 @@ def test_upgrade_creates_lifecycle_columns(tmp_path):
         "jurisdiction",
         "description",
     }
+    inspector = inspect(create_engine(database_url))
+    assert {"playbooks", "playbook_rules", "findings"} <= set(inspector.get_table_names())
 
 
 def test_seed_after_migration_is_deterministic(tmp_path):

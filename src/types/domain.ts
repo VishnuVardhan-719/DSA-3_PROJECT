@@ -27,6 +27,12 @@ export interface Contract {
   updatedAt: string
 }
 
+export interface DatasetImportResult {
+  imported: number
+  contractIds: string[]
+  filename: string
+}
+
 export interface Clause {
   id: string
   contractId: string
@@ -42,6 +48,8 @@ export interface Clause {
   previousVersion?: string
   matchedText?: string
   match?: string
+  matchedTerms?: string[]
+  termFrequency?: Record<string, number>
   updatedAt?: string
   archivedAt?: string
 }
@@ -55,20 +63,81 @@ export interface ContractVersion {
   note: string
 }
 
+export interface PlaybookRule {
+  id: string
+  clauseCategory: string
+  requiredPhrases: string[]
+  prohibitedPhrases: string[]
+  risk: 'Low' | 'Medium' | 'High'
+  remediation: string
+}
+
+export interface Playbook {
+  id: string
+  name: string
+  version: string
+  contractType: string
+  jurisdiction: string
+  status: 'Draft' | 'Active' | 'Archived'
+  rules: PlaybookRule[]
+}
+
+export interface Finding {
+  id: string
+  contractId: string
+  versionId: string
+  clauseId?: string | null
+  ruleId: string
+  status: ComplianceStatus
+  risk: 'Low' | 'Medium' | 'High'
+  evidence: string
+  remediation: string
+  overrideNotes?: string | null
+  overriddenAt?: string | null
+}
+
+export type ClauseChangeKind = 'Added' | 'Removed' | 'Modified' | 'Unchanged'
+export type DiffOperation = 'equal' | 'insert' | 'delete'
+
+export interface DiffSpan {
+  op: DiffOperation
+  words: string[]
+}
+
 export interface ClauseChange {
   id: string
   clauseId: string
   title: string
-  kind: 'Added' | 'Removed' | 'Modified'
+  kind: ClauseChangeKind
   before?: string
   after?: string
+  commonWords?: string[]
+  spans?: DiffSpan[]
+}
+
+export interface ComparisonSummary {
+  added: number
+  removed: number
+  modified: number
+  unchanged: number
+  total: number
 }
 
 export interface ComplianceObligation {
   id: string
   name: string
   category: string
+  description?: string
   clauses: string[]
+}
+
+export interface CoverageStep {
+  step: number
+  clauseId: string
+  newlyCovered: string[]
+  coveredCount: number
+  uncoveredCount: number
+  uncoveredAfter: string[]
 }
 
 export interface CoverageResult {
@@ -76,6 +145,10 @@ export interface CoverageResult {
   covered: number
   total: number
   status: 'Complete Coverage' | 'Partial Coverage'
+  uncoveredObligationIds?: string[]
+  steps?: CoverageStep[]
+  clauseCoverage?: Record<string, string[]>
+  method?: string
 }
 
 export interface Reviewer {
@@ -108,12 +181,40 @@ export interface Assignment {
   contractName?: string
   reviewerName?: string
   cost?: number
+  explanation?: string
+}
+
+export interface ReviewerLoad {
+  reviewerId: string
+  capacity: number
+  existingWorkload: number
+  proposedCount: number
+  projectedLoad: number
+  remainingCapacity: number
+}
+
+export interface UnassignedContract {
+  contractId: string
+  reason: string
+}
+
+export interface AssignmentProposal {
+  assignments: Assignment[]
+  assignedCount: number
+  totalCost: number
+  unassignedContractIds: string[]
+  unassigned: UnassignedContract[]
+  reviewerLoads: ReviewerLoad[]
+  eligiblePairs: number
+  objective: string
 }
 
 export interface AuditEvent {
   id: string
   timestamp: string
   user: string
+  actorId?: string
+  actorRole?: string
   action: string
   entity: string
   version?: string
@@ -156,16 +257,25 @@ export interface DashboardSummary {
 
 export interface SimilarityNode { id: string; label?: string; name?: string; cluster?: string | number }
 export interface SimilarityEdge { source: string; target: string; score: number }
-export interface SimilarityGraph { nodes: SimilarityNode[]; edges: SimilarityEdge[]; components?: string[][] }
+export interface SimilarityGraph {
+  nodes: SimilarityNode[]
+  edges: SimilarityEdge[]
+  components?: string[][]
+  threshold?: number
+  isolatedContractIds?: string[]
+  comparedPairs?: number
+}
 
 export interface VersionComparison {
   contractId: string
   baseVersion: string
   comparedVersion: string
   changes: ClauseChange[]
+  summary?: ComparisonSummary
   added?: number
   removed?: number
   modified?: number
+  unchanged?: number
 }
 
 export interface Settings {

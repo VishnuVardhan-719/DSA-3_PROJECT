@@ -9,6 +9,7 @@ const ClauseSearchPage = lazy(() => import('./pages/ClauseSearchPage').then((m) 
 const VersionAnalysisPage = lazy(() => import('./pages/VersionAnalysisPage').then((m) => ({ default: m.VersionAnalysisPage })))
 const SimilarityPage = lazy(() => import('./pages/SimilarityPage').then((m) => ({ default: m.SimilarityPage })))
 const ComplianceCoveragePage = lazy(() => import('./pages/ComplianceCoveragePage').then((m) => ({ default: m.ComplianceCoveragePage })))
+const PlaybooksPage = lazy(() => import('./pages/PlaybooksPage').then((m) => ({ default: m.PlaybooksPage })))
 const ReviewerAssignmentPage = lazy(() => import('./pages/ReviewerAssignmentPage').then((m) => ({ default: m.ReviewerAssignmentPage })))
 const ReviewQueuePage = lazy(() => import('./pages/ReviewQueuePage').then((m) => ({ default: m.ReviewQueuePage })))
 const AuditTrailPage = lazy(() => import('./pages/AuditTrailPage').then((m) => ({ default: m.AuditTrailPage })))
@@ -25,6 +26,7 @@ export default function App() {
     <Route path="/version-analysis" element={<VersionAnalysisPage />} />
     <Route path="/similarity-clustering" element={<SimilarityPage />} />
     <Route path="/compliance-coverage" element={<ComplianceCoveragePage />} />
+    <Route path="/playbooks" element={<PlaybooksPage />} />
     <Route path="/reviewer-assignment" element={<ReviewerAssignmentPage />} />
     <Route path="/review-queue" element={<ReviewQueuePage />} />
     <Route path="/audit-trail" element={<AuditTrailPage />} />

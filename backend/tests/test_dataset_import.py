@@ -40,3 +40,17 @@ def test_import_dataset_rejects_invalid_rows_without_partial_writes(client):
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "invalid_dataset"
     assert client.get("/contracts", params={"query": "Valid"}).json()["total"] == 0
+
+
+@pytest.mark.parametrize("filename", ["cuad_contract_clauses.json", "sec_edgar_exhibit_filings.csv"])
+def test_bundled_datasets_import_through_the_api(client, filename):
+    path = Path(__file__).resolve().parents[2] / "datasets" / filename
+    response = client.post("/contracts/import-dataset", files={"file": (filename, path.read_bytes())})
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["imported"] == 200
+    assert len(set(payload["contractIds"])) == 200
+    assert client.get("/contracts").json()["total"] == 212
+    clauses = client.get(f"/contracts/{payload['contractIds'][0]}/clauses").json()["total"]
+    assert clauses > 0 if filename.endswith(".json") else clauses == 0

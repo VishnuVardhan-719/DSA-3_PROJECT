@@ -67,6 +67,11 @@ Submission material is available in the editable [final project report](docs/Con
 Resetting the database always recreates:
 
 - 12 synthetic contracts across privacy, technology, procurement, commercial, research, and financial domains
+- 36 versions and 276 clause-version rows, with 7–8 clauses per version
+- Added, removed, unchanged, and modified clause cases
+- 10 obligations with deterministic clause mappings
+- 6 reviewers with expertise, workload, and capacity
+- Persistent review items, settings, and audit events
 
 ## Importing external contract datasets
 
@@ -77,16 +82,21 @@ The **Contracts** page supports two entry paths: **Import dataset** for an initi
 - CUAD-style clause exports must be normalized to JSON so source clause wording can be included. SEC/EDGAR-style filing metadata must be normalized to CSV or JSON. Raw upstream CUAD releases and raw SEC API responses are not directly accepted.
 
 Missing owner, department, compliance status, and date values receive explicit dataset-import defaults and must be reviewed before a contract is approved. The importer is a structured metadata loader; it does not infer legal terms from raw PDFs or research labels.
-- 36 versions and 276 clause-version rows, with 7–8 clauses per version
-- Added, removed, unchanged, and modified clause cases
-- 10 obligations with deterministic clause mappings
-- 6 reviewers with expertise, workload, and capacity
-- Persistent review items, settings, and audit events
+
+The `datasets/` directory contains optional normalized import samples. Its `README.md` records attribution, source limitations, and placeholder metadata. The default seed remains synthetic; importing these samples is a separate, explicit action.
+
+To rebuild the samples from already-extracted source archives (no download occurs):
+
+```powershell
+.\.venv\Scripts\python.exe tools\build_kaggle_datasets.py --source .scratch\kaggle --out datasets --limit 200
+```
+
+The converter checks both outputs for non-empty record counts and size limits before writing either file. Its regression tests run with the backend suite.
 
 ## Requirements and Python 3.14 safety
 
 - Node.js and npm
-- The existing `C:\Python314\python.exe`, version 3.14.4
+- The existing `C:\Python314\python.exe`, Python 3.14.x (local verification uses 3.14.7; CI pins 3.14.4)
 
 Do not replace or downgrade Python. Verify binary compatibility before installation:
 
@@ -138,7 +148,9 @@ npx playwright install chromium
 npm run test:e2e
 ```
 
-Expected checks are the full backend Pytest suite, Oxlint, TypeScript project compilation, Vitest, the production Vite build, and Chromium Playwright tests. Run them from a clean deterministic seed when comparing exact record counts or screenshots.
+Expected checks are the full backend Pytest suite, Oxlint, TypeScript project compilation, Vitest, the production Vite build, and Chromium Playwright tests. Backend tests use temporary databases. Playwright creates and resets only `backend/data/e2e.db`; it does not reset the developer database. Its API port must be free, and any existing frontend on port 5181 must target that test API. Stop existing development servers before running the browser suite.
+
+Run these checks sequentially on memory-constrained machines; running the build and browser suite together can stall the test frontend. Local verification on 2026-09-30 passed 78 backend tests, 9 frontend tests, all 7 Chromium workflows, typecheck, lint, and the production build.
 
 ## API overview
 
@@ -167,8 +179,8 @@ backend/docs/           Viva-oriented algorithm documentation
 
 ## Limitations and future scope
 
-- The corpus is intentionally compact and synthetic.
-- SQLite and `create_all` suit this local academic project; production migrations and concurrent deployment are outside scope.
+- The default demonstration corpus is compact and synthetic. Optional external import samples contain source-derived records and must not be treated as verified legal metadata.
+- SQLite and Alembic migrations support this local academic project; concurrent production deployment and its operational design are outside scope.
 - Local mutations require the seeded `X-Actor-Id` identity header: `USR-001` (Administrator), `USR-002` (Legal Reviewer), or `USR-003` (Read Only). The React client uses `USR-001` by default and can be switched through `localStorage.contractWorkspaceActorId`.
 - This local identity header provides role enforcement and audit attribution, **not production authentication**: there are no passwords, sessions, encrypted credentials, tenants, or SSO yet.
 - OCR/scanned-document extraction, external regulatory feeds, and AI/LLM features are not implemented.
